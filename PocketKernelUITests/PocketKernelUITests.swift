@@ -3,16 +3,21 @@ import XCTest
 @MainActor final class PocketKernelUITests: XCTestCase {
     func testOneShotMockGenerationRecordPersistenceExportAndDelete() {
         let app = XCUIApplication(); app.launchArguments = ["-PKUITesting", "1", "-PKResetDatabase", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "create"]; app.launch()
-        XCTAssertTrue(app.buttons["Generate on device"].waitForExistence(timeout: 10)); app.buttons["Generate on device"].tap()
-        let install = app.buttons["Install Service Log"]; XCTAssertTrue(install.waitForExistence(timeout: 15)); install.tap()
+        tapCenter(app.buttons["Generate on device"], timeout: 10)
+        let install = app.buttons["Install Service Log"]; tapCenter(install, timeout: 15)
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: install); waitForExpectations(timeout: 10)
         app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
-        XCTAssertTrue(app.staticTexts["Service Log"].waitForExistence(timeout: 10)); app.staticTexts["Service Log"].tap()
-        XCTAssertTrue(app.buttons["Add Service"].waitForExistence(timeout: 5)); app.buttons["Add Service"].tap(); app.textFields["Mileage"].tap(); app.textFields["Mileage"].typeText("42000"); app.buttons["Save"].tap()
+        tapCenter(app.staticTexts["Service Log"], timeout: 10)
+        tapCenter(app.buttons["Add Service"]); tapCenter(app.textFields["Mileage"]); app.textFields["Mileage"].typeText("42000"); tapCenter(app.buttons["Save"])
         app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
-        if app.buttons["Continue Safely"].waitForExistence(timeout: 2) { app.buttons["Continue Safely"].tap() }
-        XCTAssertTrue(app.staticTexts["Service Log"].waitForExistence(timeout: 10)); app.staticTexts["Service Log"].tap()
+        if app.buttons["Continue Safely"].waitForExistence(timeout: 2) { tapCenter(app.buttons["Continue Safely"]) }
+        tapCenter(app.staticTexts["Service Log"], timeout: 10)
         XCTAssertTrue(app.staticTexts["42000"].waitForExistence(timeout: 5))
+    }
+
+    private func tapCenter(_ element: XCUIElement, timeout: TimeInterval = 5) {
+        XCTAssertTrue(element.waitForExistence(timeout: timeout))
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
     func testRecoveryFixtureAppears() {
