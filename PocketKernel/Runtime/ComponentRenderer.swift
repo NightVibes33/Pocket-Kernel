@@ -87,5 +87,15 @@ struct ComponentRenderer: View {
     }
     private func display(_ value: PocketValue) -> String { switch value { case .null: ""; case .bool(let value): value ? "Yes" : "No"; case .number(let value): value.formatted(); case .string(let value): value; case .date(let value): value.formatted(date: .abbreviated, time: .omitted); case .array(let value): "\(value.count) items"; case .object(let value): "\(value.count) fields" } }
     private func childRenderer(_ child: ComponentSpec) -> some View { ComponentRenderer(component: child, recordsByCollection: recordsByCollection, runtimeValues: $runtimeValues, runAction: runAction, importFile: importFile, exportFile: exportFile) }
-    private func recordRow(_ record: PocketRecord) -> some View { VStack(alignment: .leading, spacing: 4) { ForEach(record.values.sorted(by: { $0.key < $1.key }), id: \.key) { pair in LabeledContent(pair.key.capitalized, value: display(pair.value)) } } }
+    private func recordRow(_ record: PocketRecord) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(record.values.sorted(by: { $0.key < $1.key }), id: \.key) { pair in
+                let value = display(pair.value)
+                LabeledContent(pair.key.capitalized, value: value)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("record-field-\(pair.key)")
+                    .accessibilityLabel("\(pair.key.capitalized), \(value)")
+            }
+        }
+    }
 }
