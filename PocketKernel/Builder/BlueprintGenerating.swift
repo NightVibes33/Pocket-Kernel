@@ -115,7 +115,7 @@ struct BlueprintRepairer: Sendable {
     }
 
     private func cleanID(_ value: String, fallback: String) -> String {
-        let result = value.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }.split(separator: "-").joined(separator: "-")
+        let result = String(value.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }.split(separator: "-").joined(separator: "-"))
         return result.isEmpty ? fallback : result
     }
     private func cleanTitle(_ value: String, fallback: String) -> String { String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120)).isEmpty ? fallback : String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120)) }
