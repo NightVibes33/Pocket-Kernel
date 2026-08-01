@@ -51,7 +51,7 @@ jobs:
           grep -q 'PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel' build/build-settings.txt
           Scripts/scan_source.sh
           Scripts/validate_templates.py PocketKernel/Templates
-          swiftformat --lint PocketKernel PocketKernelTests PocketKernelUITests
+          swiftformat PocketKernel PocketKernelTests PocketKernelUITests --lint
           swiftlint lint --strict --config .swiftlint.yml
       - name: Select simulator
         id: simulator
