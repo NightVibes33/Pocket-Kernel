@@ -19,7 +19,7 @@ struct RootTabView: View {
             ActivityView().tag(RootTab.activity).tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
             SettingsView().tag(RootTab.settings).tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
-        .fullScreenCover(isPresented: Binding(get: { !onboardingComplete }, set: { if !$0 { onboardingComplete = true } })) { OnboardingView { onboardingComplete = true } }
+        .fullScreenCover(isPresented: Binding(get: { !onboardingComplete && !ProcessInfo.processInfo.arguments.contains("-PKUITesting") }, set: { if !$0 { onboardingComplete = true } })) { OnboardingView { onboardingComplete = true } }
         .sheet(item: $environment.pendingOpenApp) { RuntimeView(manifest: $0, store: environment.store) }
         .confirmationDialog("PocketKernel recovered from an interrupted session", isPresented: Binding(get: { environment.lifecycle.recoveryRequired }, set: { environment.lifecycle.recoveryRequired = $0 }), titleVisibility: .visible) {
             if let id = environment.lifecycle.affectedAppID, let app = environment.apps.first(where: { $0.id == id }) { Button("Reopen \(app.name)") { environment.pendingOpenApp = app; environment.lifecycle.resumeSession() }; Button("Export \(app.name)") { environment.pendingOpenApp = app; environment.lifecycle.dismissRecovery() }; Button("Delete \(app.name)", role: .destructive) { Task { await environment.delete(app.id); environment.lifecycle.dismissRecovery() } } }
