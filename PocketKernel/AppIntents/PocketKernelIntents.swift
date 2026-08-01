@@ -34,6 +34,6 @@ struct OpenMicroAppIntent: AppIntent {
 
 struct PocketKernelShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        AppShortcut(intent: OpenMicroAppIntent(), phrases: ["Open \(.$app) in \(.applicationName)", "Run \(.$app) in \(.applicationName)"], shortTitle: "Open Pocket App", systemImageName: "square.grid.2x2.fill")
+        AppShortcut(intent: OpenMicroAppIntent(), phrases: ["Open \(\.$app) in \(.applicationName)", "Run \(\.$app) in \(.applicationName)"], shortTitle: "Open Pocket App", systemImageName: "square.grid.2x2.fill")
     }
 }
