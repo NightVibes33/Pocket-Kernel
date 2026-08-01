@@ -11,7 +11,12 @@ import XCTest
         app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
         let installedServiceLog = app.buttons["Service Log, Track maintenance and upcoming service"]
         tapCenter(installedServiceLog, timeout: 10)
-        tapCenter(app.buttons["Add Service"]); tapCenter(app.textFields["Mileage"]); app.textFields["Mileage"].typeText("42000"); tapCenter(app.buttons["Save"])
+        let addService = app.buttons["Add Service"]
+        XCTAssertTrue(addService.waitForExistence(timeout: 5)); addService.tap()
+        let mileage = app.textFields["Mileage"]
+        XCTAssertTrue(mileage.waitForExistence(timeout: 10)); mileage.tap(); mileage.typeText("42000")
+        let save = app.buttons["Save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5)); save.tap()
         app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
         if app.buttons["Continue Safely"].waitForExistence(timeout: 2) { tapCenter(app.buttons["Continue Safely"]) }
         tapCenter(app.buttons["Service Log, Track maintenance and upcoming service"], timeout: 10)
