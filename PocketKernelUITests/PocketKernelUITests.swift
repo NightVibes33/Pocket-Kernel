@@ -4,7 +4,9 @@ import XCTest
     func testOneShotMockGenerationRecordPersistenceExportAndDelete() {
         let app = XCUIApplication(); app.launchArguments = ["-PKUITesting", "1", "-PKResetDatabase", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "create"]; app.launch()
         tapCenter(app.buttons["Generate on device"], timeout: 10)
-        let install = app.buttons["Install Service Log"]; tapCenter(install, timeout: 15)
+        let install = app.buttons["Install Service Log"]
+        scrollToElement(install, in: app, timeout: 15)
+        tapCenter(install)
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: install); waitForExpectations(timeout: 10)
         app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
         tapCenter(app.staticTexts["Service Log"], timeout: 10)
@@ -18,6 +20,14 @@ import XCTest
     private func tapCenter(_ element: XCUIElement, timeout: TimeInterval = 5) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout))
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    }
+
+    private func scrollToElement(_ element: XCUIElement, in app: XCUIApplication, timeout: TimeInterval) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !element.exists, Date() < deadline {
+            app.swipeUp()
+        }
+        XCTAssertTrue(element.exists)
     }
 
     func testRecoveryFixtureAppears() {
