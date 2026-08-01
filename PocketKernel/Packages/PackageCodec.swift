@@ -47,6 +47,6 @@ struct PackageCodec: Sendable {
     }
 
     private func sha256(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
-    private func makeEncoder() -> JSONEncoder { let value = JSONEncoder(); value.outputFormatting = [.sortedKeys]; value.dateEncodingStrategy = .secondsSince1970; return value }
-    private func makeDecoder() -> JSONDecoder { let value = JSONDecoder(); value.dateDecodingStrategy = .secondsSince1970; return value }
+    private func makeEncoder() -> JSONEncoder { let value = JSONEncoder(); value.outputFormatting = [.sortedKeys]; return value }
+    private func makeDecoder() -> JSONDecoder { JSONDecoder() }
 }
