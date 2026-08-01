@@ -9,11 +9,12 @@ import XCTest
         tapCenter(install)
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: install); waitForExpectations(timeout: 10)
         app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
-        tapCenter(app.staticTexts["Service Log"], timeout: 10)
+        let installedServiceLog = app.buttons["Service Log, Track maintenance and upcoming service"]
+        tapCenter(installedServiceLog, timeout: 10)
         tapCenter(app.buttons["Add Service"]); tapCenter(app.textFields["Mileage"]); app.textFields["Mileage"].typeText("42000"); tapCenter(app.buttons["Save"])
         app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
         if app.buttons["Continue Safely"].waitForExistence(timeout: 2) { tapCenter(app.buttons["Continue Safely"]) }
-        tapCenter(app.staticTexts["Service Log"], timeout: 10)
+        tapCenter(app.buttons["Service Log, Track maintenance and upcoming service"], timeout: 10)
         XCTAssertTrue(app.staticTexts["42000"].waitForExistence(timeout: 5))
     }
 
