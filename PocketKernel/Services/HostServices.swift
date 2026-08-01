@@ -13,9 +13,9 @@ enum HostServiceError: LocalizedError {
 final class RedirectValidator: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     let allowedHosts: Set<String>
     init(allowedHosts: Set<String>) { self.allowedHosts = allowedHosts }
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection newRequest: URLRequest, newResponse: HTTPURLResponse, completionHandler: @escaping (URLRequest?) -> Void) {
-        guard newRequest.url?.scheme == "https", let host = newRequest.url?.host?.lowercased(), allowedHosts.contains(host) else { completionHandler(nil); return }
-        completionHandler(newRequest)
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        guard request.url?.scheme == "https", let host = request.url?.host?.lowercased(), allowedHosts.contains(host) else { completionHandler(nil); return }
+        completionHandler(request)
     }
 }
 
