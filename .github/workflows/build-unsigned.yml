@@ -1,5 +1,7 @@
 name: Build PocketKernel Unsigned IPA
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       publish_release:
@@ -83,7 +85,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Publish release
-        if: success() && inputs.publish_release
+        if: success() && (github.event_name == 'push' || inputs.publish_release)
         env: {GH_TOKEN: "${{ github.token }}"}
         run: |
           tag="pocketkernel-build-${GITHUB_RUN_NUMBER}"
