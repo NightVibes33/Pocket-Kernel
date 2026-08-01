@@ -10,6 +10,17 @@ struct RootTabView: View {
     @AppStorage("PKOnboardingComplete") private var onboardingComplete = false
     @State private var selectedTab: RootTab = .home
 
+    init() {
+        let arguments = ProcessInfo.processInfo.arguments
+        let initialTab: RootTab
+        if let marker = arguments.firstIndex(of: "-PKStartTab"), arguments.indices.contains(marker + 1) {
+            initialTab = arguments[marker + 1] == "create" ? .create : arguments[marker + 1] == "library" ? .library : .home
+        } else {
+            initialTab = .home
+        }
+        _selectedTab = State(initialValue: initialTab)
+    }
+
     var body: some View {
         @Bindable var environment = environment
         TabView(selection: $selectedTab) {
