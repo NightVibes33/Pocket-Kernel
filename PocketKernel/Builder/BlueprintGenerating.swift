@@ -89,3 +89,35 @@ struct BlueprintConverter: Sendable {
                                 collections: collections, capabilities: capabilities, createdAt: now, updatedAt: now)
     }
 }
+
+struct BlueprintRepairer: Sendable {
+    func repair(_ source: MicroAppBlueprint) -> MicroAppBlueprint {
+        var blueprint = source
+        blueprint.name = cleanTitle(blueprint.name, fallback: "Pocket App")
+        blueprint.summary = cleanTitle(blueprint.summary, fallback: "A locally generated Pocket App")
+        blueprint.collections = Array(blueprint.collections.prefix(8)).enumerated().map { index, collection in
+            let id = cleanID(collection.id, fallback: "collection-\(index + 1)")
+            let fields = Array(collection.fields.prefix(12)).enumerated().map { fieldIndex, field in GeneratedField(id: cleanID(field.id, fallback: "field-\(fieldIndex + 1)"), title: cleanTitle(field.title, fallback: "Field \(fieldIndex + 1)")) }
+            return GeneratedCollection(id: id, title: cleanTitle(collection.title, fallback: "Records"), fields: fields.isEmpty ? [.init(id: "title", title: "Title")] : uniqueFields(fields))
+        }
+        if blueprint.collections.isEmpty { blueprint.collections = [.init(id: "records", title: "Records", fields: [.init(id: "title", title: "Title")])] }
+        let collectionIDs = Set(blueprint.collections.map(\.id))
+        blueprint.screens = Array(blueprint.screens.prefix(8)).enumerated().map { index, screen in
+            let collectionID = screen.collectionID.flatMap { collectionIDs.contains($0) ? $0 : nil } ?? blueprint.collections.first?.id
+            return GeneratedScreen(id: cleanID(screen.id, fallback: "screen-\(index + 1)"), title: cleanTitle(screen.title, fallback: "Screen \(index + 1)"), collectionID: collectionID)
+        }
+        if blueprint.screens.isEmpty { blueprint.screens = [.init(id: "home", title: blueprint.name, collectionID: blueprint.collections.first?.id)] }
+        blueprint.actions = Array(blueprint.actions.prefix(12)).enumerated().map { index, action in
+            let target = action.target.flatMap { collectionIDs.contains($0) ? $0 : nil } ?? (action.kind == .createRecord ? blueprint.collections.first?.id : action.target)
+            return GeneratedAction(id: cleanID(action.id, fallback: "action-\(index + 1)"), title: cleanTitle(action.title, fallback: "Action"), kind: action.kind, target: target)
+        }
+        return blueprint
+    }
+
+    private func cleanID(_ value: String, fallback: String) -> String {
+        let result = value.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }.split(separator: "-").joined(separator: "-")
+        return result.isEmpty ? fallback : result
+    }
+    private func cleanTitle(_ value: String, fallback: String) -> String { String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120)).isEmpty ? fallback : String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120)) }
+    private func uniqueFields(_ fields: [GeneratedField]) -> [GeneratedField] { var seen = Set<String>(); return fields.compactMap { field in seen.insert(field.id).inserted ? field : nil } }
+}

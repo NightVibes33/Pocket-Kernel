@@ -28,6 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with: {fetch-depth: 1, persist-credentials: false}
+      - name: Prepare directories
+        run: |
+          set -euo pipefail
+          rm -rf build output
+          mkdir -p build output
       - name: Verify runner and Xcode
         run: |
           set -euo pipefail
@@ -38,11 +43,12 @@ jobs:
       - name: Prepare and inspect
         run: |
           set -euo pipefail
-          rm -rf build output; mkdir -p build output; chmod +x Scripts/*.sh
+          chmod +x Scripts/*.sh Scripts/*.py
           xcodebuild -project "$PROJECT" -scheme "$SCHEME" -showBuildSettings > build/build-settings.txt
           grep -q 'IPHONEOS_DEPLOYMENT_TARGET = 26.0' build/build-settings.txt
           grep -q 'PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel' build/build-settings.txt
           Scripts/scan_source.sh
+          Scripts/validate_templates.py PocketKernel/Templates
           swiftformat --lint PocketKernel PocketKernelTests PocketKernelUITests
           swiftlint lint --strict --config .swiftlint.yml
       - name: Select simulator

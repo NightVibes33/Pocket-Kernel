@@ -12,4 +12,4 @@ test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$plist")" = "26.0"
 archs="$(lipo -archs "$exe")"; grep -qw arm64 <<<"$archs"; ! grep -qw x86_64 <<<"$archs"
 ! find "$app" -name embedded.mobileprovision -o -name _CodeSignature | grep -q .
 ! otool -L "$exe" | grep -E '/PrivateFrameworks/|iphonesimulator'
-while IFS= read -r template; do plutil -lint "$template" >/dev/null || /usr/bin/python3 -m json.tool "$template" >/dev/null; done < <(find "$app" -name '*.pocketapp')
+Scripts/validate_templates.py "$app/Templates"

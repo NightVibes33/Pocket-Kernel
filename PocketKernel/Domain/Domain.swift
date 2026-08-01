@@ -73,6 +73,10 @@ struct ComponentSpec: Codable, Sendable, Identifiable, Equatable {
     var collection: String?
     var actionID: String?
     var children: [ComponentSpec] = []
+    var options: [String] = []
+    var minimum: Double? = nil
+    var maximum: Double? = nil
+    var visibilityExpression: String? = nil
 }
 
 struct ScreenSpec: Codable, Sendable, Identifiable, Equatable {
@@ -95,6 +99,9 @@ struct ActionSpec: Codable, Sendable, Identifiable, Equatable {
     var target: String?
     var value: PocketValue?
     var requiredCapability: PocketCapability?
+    var condition: String? = nil
+    var reason: String? = nil
+    var parameters: [String: PocketValue] = [:]
 }
 
 struct FieldSpec: Codable, Sendable, Identifiable, Equatable {
@@ -115,6 +122,19 @@ struct PocketRecord: Codable, Sendable, Identifiable, Equatable {
     var values: [String: PocketValue]
     var createdAt: Date
     var updatedAt: Date
+}
+
+enum PermissionDecision: String, Codable, Sendable, CaseIterable { case notRequested, allowOnce, alwaysAllow, denied }
+
+struct ActivityEvent: Codable, Sendable, Identifiable, Equatable {
+    enum Level: String, Codable, Sendable { case info, warning, error }
+    var id: Int64
+    var appID: UUID?
+    var level: Level
+    var category: String
+    var message: String
+    var payload: PocketValue?
+    var createdAt: Date
 }
 
 struct PocketTheme: Codable, Sendable, Equatable {

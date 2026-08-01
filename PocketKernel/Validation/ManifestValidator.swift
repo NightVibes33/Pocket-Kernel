@@ -51,6 +51,10 @@ struct ManifestValidator: Sendable {
             if let capability = action.requiredCapability, !manifest.capabilities.contains(capability) {
                 error("capability.undeclared", "actions.\(action.id)", "Action requires undeclared capability \(capability.rawValue).")
             }
+            if let expected = requiredCapability(for: action.kind), action.requiredCapability != expected {
+                error("capability.missing", "actions.\(action.id)", "\(action.kind.rawValue) must require \(expected.rawValue).")
+            }
+            if let condition = action.condition { do { try ExpressionEvaluator().validateSyntax(condition) } catch { error("expression.invalid", "actions.\(action.id).condition", error.localizedDescription) } }
         }
         for domain in manifest.allowedDomains {
             if domain.contains("*") || domain.contains("://") || domain.contains("/") || domain.isEmpty {
@@ -70,5 +74,16 @@ struct ManifestValidator: Sendable {
     }
 
     private func hasTraversal(_ value: String) -> Bool { value.contains("..") || value.contains("/") || value.contains("\\") }
+    private func requiredCapability(for kind: ActionKind) -> PocketCapability? {
+        switch kind {
+        case .copyToClipboard: .clipboardWrite
+        case .importFile: .fileImport
+        case .exportFile, .share: .fileExport
+        case .selectPhotos: .photoSelection
+        case .scheduleLocalNotification: .localNotifications
+        case .httpGet, .httpPostJSON: .network
+        case .generateText, .summarizeText, .extractFields, .classifyText, .rewriteText: .onDeviceModel
+        default: nil
+        }
+    }
 }
-
