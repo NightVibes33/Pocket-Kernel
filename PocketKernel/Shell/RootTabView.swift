@@ -185,7 +185,7 @@ struct RuntimeView: View {
         if action.kind == .createRecord, let collection = manifest.collections.first(where: { $0.id == action.target }) { formValues = Dictionary(uniqueKeysWithValues: collection.fields.map { ($0.id, "") }); editingCollection = collection; return }
         guard let executor else { runtimeError = store == nil ? "Preview mode does not execute actions." : "Runtime is still starting."; return }
         let context: [String: PocketValue] = ["state": .object(runtimeValues), "environment": .object(["currentDate": .date(Date())])]
-        Task { do { let result = try await executor.execute(id, manifest: manifest, context: context); await apply(result); await reload(); await environment.load() } catch RuntimeExecutionError.permissionRequired(let request) { permissionRequest = request } catch RuntimeExecutionError.conditionFalse { } catch { runtimeError = error.localizedDescription } }
+        Task { do { let result = try await executor.execute(id, manifest: manifest, context: context); apply(result); await reload(); await environment.load() } catch RuntimeExecutionError.permissionRequired(let request) { permissionRequest = request } catch RuntimeExecutionError.conditionFalse { } catch { runtimeError = error.localizedDescription } }
     }
 
     @MainActor private func apply(_ result: ActionResult) {
