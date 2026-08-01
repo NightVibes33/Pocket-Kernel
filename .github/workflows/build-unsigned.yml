@@ -77,10 +77,12 @@ jobs:
           fi
       - name: Run tests with deterministic model
         run: |
-          xcodebuild test -project "$PROJECT" -scheme "$SCHEME" -testPlan "$TEST_PLAN" -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' -derivedDataPath "$DERIVED_DATA" -resultBundlePath "$RESULT_BUNDLE" -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          set -o pipefail
+          xcodebuild test -project "$PROJECT" -scheme "$SCHEME" -testPlan "$TEST_PLAN" -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' -derivedDataPath "$DERIVED_DATA" -resultBundlePath "$RESULT_BUNDLE" -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO 2>&1 | tee "$OUTPUT_DIR/xcodebuild-test.log"
       - name: Build ARM64 device app
         run: |
-          xcodebuild clean build -project "$PROJECT" -scheme "$SCHEME" -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$DERIVED_DATA" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' DEVELOPMENT_TEAM=''
+          set -o pipefail
+          xcodebuild clean build -project "$PROJECT" -scheme "$SCHEME" -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$DERIVED_DATA" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' DEVELOPMENT_TEAM='' 2>&1 | tee "$OUTPUT_DIR/xcodebuild-device.log"
       - name: Package and validate unsigned IPA
         run: |
           Scripts/build_unsigned_ipa.sh "$DERIVED_DATA/Build/Products/Release-iphoneos/PocketKernel.app" "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
