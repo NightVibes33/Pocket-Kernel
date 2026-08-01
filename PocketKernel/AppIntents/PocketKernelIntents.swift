@@ -2,8 +2,8 @@ import AppIntents
 import Foundation
 
 struct MicroAppEntity: AppEntity {
-    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Pocket App")
-    static var defaultQuery = MicroAppEntityQuery()
+    static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Pocket App")
+    static let defaultQuery = MicroAppEntityQuery()
     let id: String
     let name: String
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(name)") }
@@ -22,9 +22,9 @@ struct MicroAppEntityQuery: EntityStringQuery {
 private struct MicroAppEntitySnapshot: Codable { let id: String; let name: String }
 
 struct OpenMicroAppIntent: AppIntent {
-    static var title: LocalizedStringResource = "Open a Pocket App"
-    static var description = IntentDescription("Open an installed declarative app in PocketKernel.")
-    static var openAppWhenRun = true
+    static let title: LocalizedStringResource = "Open a Pocket App"
+    static let description = IntentDescription("Open an installed declarative app in PocketKernel.")
+    static let openAppWhenRun = true
     @Parameter(title: "Pocket App") var app: MicroAppEntity
     func perform() async throws -> some IntentResult {
         UserDefaults.standard.set(app.id, forKey: "PKRequestedAppID")
