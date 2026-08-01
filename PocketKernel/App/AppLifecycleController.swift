@@ -13,10 +13,12 @@ final class AppLifecycleController {
             .appending(path: "PocketKernel/Recovery", directoryHint: .isDirectory)
         if let root { try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) }
         markerURL = root?.appending(path: "runtime-session-open.json")
-        if let markerURL, let data = try? Data(contentsOf: markerURL), let marker = try? JSONDecoder().decode(Marker.self, from: data) {
+        let arguments = ProcessInfo.processInfo.arguments
+        let shouldReadRecoveryMarker = !arguments.contains("-PKUITesting") || arguments.contains("-PKRecoveryFixture")
+        if shouldReadRecoveryMarker, let markerURL, let data = try? Data(contentsOf: markerURL), let marker = try? JSONDecoder().decode(Marker.self, from: data) {
             recoveryRequired = true; affectedAppID = marker.appID
         }
-        if ProcessInfo.processInfo.arguments.contains("-PKRecoveryFixture") { recoveryRequired = true }
+        if arguments.contains("-PKRecoveryFixture") { recoveryRequired = true }
         writeMarker(appID: nil)
     }
 
