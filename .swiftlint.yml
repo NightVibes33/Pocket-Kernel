@@ -1,0 +1,10 @@
+included: [PocketKernel, PocketKernelTests, PocketKernelUITests]
+excluded: [build]
+only_rules:
+  - empty_count
+  - force_cast
+  - force_try
+  - private_over_fileprivate
+  - trailing_whitespace
+  - unused_import
+
