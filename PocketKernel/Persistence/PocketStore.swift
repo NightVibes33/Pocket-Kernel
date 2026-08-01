@@ -1,12 +1,20 @@
 import Foundation
 import SQLite3
 
+private final class SQLiteHandle: @unchecked Sendable {
+    var pointer: OpaquePointer?
+    deinit { sqlite3_close(pointer) }
+}
+
 actor PocketStore {
-    private var database: OpaquePointer?
+    private let handle: SQLiteHandle
+    private var database: OpaquePointer? { handle.pointer }
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
     init(inMemory: Bool = false) throws {
+        let handle = SQLiteHandle()
+        self.handle = handle
         let path: String
         if inMemory { path = ":memory:" } else {
             let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
@@ -14,12 +22,10 @@ actor PocketStore {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             path = root.appending(path: "pocketkernel.sqlite").path
         }
-        guard sqlite3_open(path, &database) == SQLITE_OK else { throw StoreError.open }
+        guard sqlite3_open(path, &handle.pointer) == SQLITE_OK else { throw StoreError.open }
         let migration = "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; CREATE TABLE IF NOT EXISTS installed_apps (id TEXT PRIMARY KEY NOT NULL, manifest BLOB NOT NULL, previous_manifest BLOB, favorite INTEGER NOT NULL DEFAULT 0, created_at REAL NOT NULL, updated_at REAL NOT NULL); CREATE TABLE IF NOT EXISTS records (app_id TEXT NOT NULL, collection_id TEXT NOT NULL, record_id TEXT NOT NULL, payload BLOB NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL, PRIMARY KEY(app_id, collection_id, record_id)); CREATE TABLE IF NOT EXISTS runtime_values (app_id TEXT NOT NULL, key TEXT NOT NULL, value BLOB NOT NULL, PRIMARY KEY(app_id,key)); CREATE TABLE IF NOT EXISTS permission_decisions (app_id TEXT NOT NULL, capability TEXT NOT NULL, decision TEXT NOT NULL, PRIMARY KEY(app_id,capability)); CREATE TABLE IF NOT EXISTS activity_events (id INTEGER PRIMARY KEY AUTOINCREMENT, app_id TEXT, level TEXT NOT NULL, category TEXT NOT NULL, message TEXT NOT NULL, payload BLOB, created_at REAL NOT NULL); PRAGMA user_version=1;"
         guard sqlite3_exec(database, migration, nil, nil, nil) == SQLITE_OK else { throw StoreError.query }
     }
-
-    deinit { sqlite3_close(database) }
 
     func installedApps() throws -> [MicroAppManifest] {
         var statement: OpaquePointer?
