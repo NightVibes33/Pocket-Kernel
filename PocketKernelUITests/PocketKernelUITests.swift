@@ -20,7 +20,9 @@ import XCTest
         app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
         if app.buttons["Continue Safely"].waitForExistence(timeout: 2) { tapCenter(app.buttons["Continue Safely"]) }
         tapCenter(app.buttons["Service Log, Track maintenance and upcoming service"], timeout: 10)
-        XCTAssertTrue(app.staticTexts["42000"].waitForExistence(timeout: 5))
+        let persistedMileage = app.descendants(matching: .any)["record-field-mileage"]
+        XCTAssertTrue(persistedMileage.waitForExistence(timeout: 5))
+        XCTAssertTrue(persistedMileage.label.contains("42000"))
     }
 
     private func tapCenter(_ element: XCUIElement, timeout: TimeInterval = 5) {
