@@ -54,7 +54,7 @@ struct ManifestValidator: Sendable {
             if let expected = requiredCapability(for: action.kind), action.requiredCapability != expected {
                 error("capability.missing", "actions.\(action.id)", "\(action.kind.rawValue) must require \(expected.rawValue).")
             }
-            if let condition = action.condition { do { try ExpressionEvaluator().validateSyntax(condition) } catch { error("expression.invalid", "actions.\(action.id).condition", error.localizedDescription) } }
+            if let condition = action.condition { do { try ExpressionEvaluator().validateSyntax(condition) } catch let caught { error("expression.invalid", "actions.\(action.id).condition", caught.localizedDescription) } }
         }
         for domain in manifest.allowedDomains {
             if domain.contains("*") || domain.contains("://") || domain.contains("/") || domain.isEmpty {
