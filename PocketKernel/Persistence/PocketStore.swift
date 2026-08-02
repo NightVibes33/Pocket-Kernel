@@ -47,7 +47,7 @@ actor PocketStore {
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { throw StoreError.query }
         defer { sqlite3_finalize(statement) }
         let id = manifest.id.uuidString
-        bind(id, to: statement, at: 1); data.withUnsafeBytes { sqlite3_bind_blob(statement, 2, $0.baseAddress, Int32(data.count), SQLITE_TRANSIENT) }
+        bind(id, to: statement, at: 1); _ = data.withUnsafeBytes { sqlite3_bind_blob(statement, 2, $0.baseAddress, Int32(data.count), SQLITE_TRANSIENT) }
         sqlite3_bind_double(statement, 3, manifest.createdAt.timeIntervalSince1970); sqlite3_bind_double(statement, 4, Date().timeIntervalSince1970)
         guard sqlite3_step(statement) == SQLITE_DONE else { throw StoreError.query }
     }
@@ -92,7 +92,7 @@ actor PocketStore {
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else { throw StoreError.query }
         defer { sqlite3_finalize(statement) }
         bind(appID.uuidString, to: statement, at: 1); bind(record.collectionID, to: statement, at: 2); bind(record.id.uuidString, to: statement, at: 3)
-        data.withUnsafeBytes { sqlite3_bind_blob(statement, 4, $0.baseAddress, Int32(data.count), SQLITE_TRANSIENT) }
+        _ = data.withUnsafeBytes { sqlite3_bind_blob(statement, 4, $0.baseAddress, Int32(data.count), SQLITE_TRANSIENT) }
         sqlite3_bind_double(statement, 5, record.createdAt.timeIntervalSince1970); sqlite3_bind_double(statement, 6, record.updatedAt.timeIntervalSince1970)
         guard sqlite3_step(statement) == SQLITE_DONE else { throw StoreError.query }
     }
@@ -114,7 +114,7 @@ actor PocketStore {
         if let value {
             let data = try encoder.encode(value); var statement: OpaquePointer?
             guard sqlite3_prepare_v2(database, "INSERT OR REPLACE INTO runtime_values(app_id,key,value) VALUES(?,?,?)", -1, &statement, nil) == SQLITE_OK else { throw StoreError.query }
-            defer { sqlite3_finalize(statement) }; bind(appID.uuidString, to: statement, at: 1); bind(key, to: statement, at: 2); data.withUnsafeBytes { sqlite3_bind_blob(statement, 3, $0.baseAddress, Int32(data.count), SQLITE_TRANSIENT) }
+            defer { sqlite3_finalize(statement) }; bind(appID.uuidString, to: statement, at: 1); bind(key, to: statement, at: 2); _ = data.withUnsafeBytes { sqlite3_bind_blob(statement, 3, $0.baseAddress, Int32(data.count), SQLITE_TRANSIENT) }
             guard sqlite3_step(statement) == SQLITE_DONE else { throw StoreError.query }
         } else {
             var statement: OpaquePointer?; guard sqlite3_prepare_v2(database, "DELETE FROM runtime_values WHERE app_id=? AND key=?", -1, &statement, nil) == SQLITE_OK else { throw StoreError.query }
@@ -139,7 +139,7 @@ actor PocketStore {
         var statement: OpaquePointer?; guard sqlite3_prepare_v2(database, "INSERT INTO activity_events(app_id,level,category,message,payload,created_at) VALUES(?,?,?,?,?,?)", -1, &statement, nil) == SQLITE_OK else { throw StoreError.query }
         defer { sqlite3_finalize(statement) }; if let appID { bind(appID.uuidString, to: statement, at: 1) } else { sqlite3_bind_null(statement, 1) }
         bind(level.rawValue, to: statement, at: 2); bind(category, to: statement, at: 3); bind(message, to: statement, at: 4)
-        if let payload { let data = try encoder.encode(payload); data.withUnsafeBytes { sqlite3_bind_blob(statement, 5, $0.baseAddress, Int32(data.count), SQLITE_TRANSIENT) } } else { sqlite3_bind_null(statement, 5) }
+        if let payload { let data = try encoder.encode(payload); _ = data.withUnsafeBytes { sqlite3_bind_blob(statement, 5, $0.baseAddress, Int32(data.count), SQLITE_TRANSIENT) } } else { sqlite3_bind_null(statement, 5) }
         sqlite3_bind_double(statement, 6, Date().timeIntervalSince1970); guard sqlite3_step(statement) == SQLITE_DONE else { throw StoreError.query }
     }
 
