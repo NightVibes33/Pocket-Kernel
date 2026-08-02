@@ -1,0 +1,53 @@
+name: Apply Runtime Dialog Fix
+
+on:
+  push:
+    branches: [pocketkernel-1.0-full-rebuild]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+      - name: Simplify RuntimeView permission dialog
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('PocketKernel/Shell/RootTabView.swift')
+          source = path.read_text()
+          anchor = '    private var collectionSpecs: [String: CollectionSpec] { Dictionary(uniqueKeysWithValues: manifest.collections.map { ($0.id, $0) }) }\n'
+          addition = anchor + '''    private var permissionDialogTitle: String {
+              guard let request = permissionRequest else { return "Permission" }
+              return request.appName + " requests " + request.capability.displayName
+          }
+'''
+          if 'private var permissionDialogTitle:' not in source:
+              if anchor not in source:
+                  raise SystemExit('RuntimeView collectionSpecs anchor not found')
+              source = source.replace(anchor, addition, 1)
+
+          old = '            permissionRequest.map { "\\($0.appName) requests \\($0.capability.displayName)" } ?? "Permission",\n'
+          new = '            permissionDialogTitle,\n'
+          if old in source:
+              source = source.replace(old, new, 1)
+          elif new not in source:
+              raise SystemExit('Permission dialog title expression not found')
+
+          path.write_text(source)
+          PY
+          rm .github/workflows/apply-runtime-dialog-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PocketKernel/Shell/RootTabView.swift .github/workflows/apply-runtime-dialog-fix.yml
+          git commit -m 'Simplify RuntimeView permission dialog compilation'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
