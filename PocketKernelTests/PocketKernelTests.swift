@@ -112,7 +112,8 @@ final class PersistenceTests: XCTestCase {
         let store = try PocketStore(inMemory: true)
         var manifest = BlueprintConverter().convert(TemplateCatalog.serviceLogBlueprint, capabilities: [.localNotifications])
         try await store.install(PackageCodec().makePackage(manifest: manifest))
-        XCTAssertEqual(try await store.installedApps().count, 1)
+        let installedCount = try await store.installedApps().count
+        XCTAssertEqual(installedCount, 1)
 
         try await store.setFavorite(true, id: manifest.id)
         try await store.setDisabled(true, id: manifest.id)
@@ -123,12 +124,15 @@ final class PersistenceTests: XCTestCase {
         let now = Date()
         let record = PocketRecord(id: UUID(), collectionID: "services", values: ["cost": .number(20)], createdAt: now, updatedAt: now)
         try await store.save(record: record, appID: manifest.id)
-        XCTAssertEqual(try await store.records(appID: manifest.id, collectionID: "services"), [record])
+        let serviceRecords = try await store.records(appID: manifest.id, collectionID: "services")
+        XCTAssertEqual(serviceRecords, [record])
 
         try await store.setRuntimeValue(.string("query"), appID: manifest.id, key: "search")
-        XCTAssertEqual(try await store.runtimeValue(appID: manifest.id, key: "search"), .string("query"))
+        let runtimeValue = try await store.runtimeValue(appID: manifest.id, key: "search")
+        XCTAssertEqual(runtimeValue, .string("query"))
         try await store.setPermission(.alwaysAllow, appID: manifest.id, capability: .localNotifications)
-        XCTAssertEqual(try await store.permission(appID: manifest.id, capability: .localNotifications), .alwaysAllow)
+        let permission = try await store.permission(appID: manifest.id, capability: .localNotifications)
+        XCTAssertEqual(permission, .alwaysAllow)
 
         let exported = try await store.exportPackage(appID: manifest.id)
         XCTAssertEqual(try PackageCodec().decode(exported).manifest.id, manifest.id)
@@ -141,8 +145,10 @@ final class PersistenceTests: XCTestCase {
         XCTAssertNotEqual(info.manifest.name, "Updated")
 
         try await store.delete(manifest.id)
-        XCTAssertTrue(try await store.installedApps().isEmpty)
-        XCTAssertTrue(try await store.records(appID: manifest.id, collectionID: "services").isEmpty)
+        let installedAfterDelete = try await store.installedApps()
+        XCTAssertTrue(installedAfterDelete.isEmpty)
+        let recordsAfterDelete = try await store.records(appID: manifest.id, collectionID: "services")
+        XCTAssertTrue(recordsAfterDelete.isEmpty)
     }
 
     func testConcurrentActorWritesRemainConsistent() async throws {
@@ -158,7 +164,8 @@ final class PersistenceTests: XCTestCase {
             }
             try await group.waitForAll()
         }
-        XCTAssertEqual(try await store.records(appID: manifest.id, collectionID: "items").count, 40)
+        let itemCount = try await store.records(appID: manifest.id, collectionID: "items").count
+        XCTAssertEqual(itemCount, 40)
     }
 }
 
