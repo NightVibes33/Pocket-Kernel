@@ -3,22 +3,17 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-enum RootTab: Hashable { case home, create, library, activity, settings }
+private enum RootTab: Hashable { case home, create, library, activity, settings }
 
 struct RootTabView: View {
     @Environment(AppEnvironment.self) private var environment
     @AppStorage("PKOnboardingComplete") private var onboardingComplete = false
-    @State private var selectedTab: RootTab = .home
+    @State private var selectedTab: RootTab
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
-        let initialTab: RootTab
-        if let marker = arguments.firstIndex(of: "-PKStartTab"), arguments.indices.contains(marker + 1) {
-            initialTab = arguments[marker + 1] == "create" ? .create : arguments[marker + 1] == "library" ? .library : .home
-        } else {
-            initialTab = .home
-        }
-        _selectedTab = State(initialValue: initialTab)
+        let requested = Self.argumentValue("-PKStartTab", arguments: arguments)
+        _selectedTab = State(initialValue: requested == "create" ? .create : requested == "library" ? .library : .home)
     }
 
     var body: some View {
@@ -30,19 +25,64 @@ struct RootTabView: View {
             ActivityView().tag(RootTab.activity).tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
             SettingsView().tag(RootTab.settings).tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
-        .fullScreenCover(isPresented: Binding(get: { !onboardingComplete && !ProcessInfo.processInfo.arguments.contains("-PKUITesting") }, set: { if !$0 { onboardingComplete = true } })) { OnboardingView { onboardingComplete = true } }
-        .sheet(item: $environment.pendingOpenApp) { RuntimeView(manifest: $0, store: environment.store) }
-        .confirmationDialog("PocketKernel recovered from an interrupted session", isPresented: Binding(get: { environment.lifecycle.recoveryRequired }, set: { environment.lifecycle.recoveryRequired = $0 }), titleVisibility: .visible) {
-            if let id = environment.lifecycle.affectedAppID, let app = environment.apps.first(where: { $0.id == id }) { Button("Reopen \(app.name)") { environment.pendingOpenApp = app; environment.lifecycle.resumeSession() }; Button("Export \(app.name)") { environment.pendingOpenApp = app; environment.lifecycle.dismissRecovery() }; Button("Delete \(app.name)", role: .destructive) { Task { await environment.delete(app.id); environment.lifecycle.dismissRecovery() } } }
-            Button("Continue Safely") { environment.lifecycle.dismissRecovery() }
-        } message: { Text("The last micro-app may have been closed unexpectedly. Your records were preserved.") }
+        .fullScreenCover(isPresented: Binding(get: {
+            !onboardingComplete && !ProcessInfo.processInfo.arguments.contains("-PKUITesting")
+        }, set: { if !$0 { onboardingComplete = true } })) {
+            OnboardingView { onboardingComplete = true }
+        }
+        .sheet(item: $environment.pendingOpenApp) { manifest in NavigationStack { RuntimeView(manifest: manifest) } }
+        .alert("PocketKernel Error", isPresented: Binding(get: { environment.startupError != nil }, set: { if !$0 { environment.clearError() } })) {
+            Button("OK") { environment.clearError() }
+        } message: { Text(environment.startupError ?? "Unknown error") }
+        .confirmationDialog("PocketKernel recovered an interrupted app", isPresented: Binding(get: { environment.lifecycle.recoveryRequired }, set: { if !$0 { environment.lifecycle.dismissRecovery() } }), titleVisibility: .visible) {
+            recoveryActions
+        } message: { Text(environment.lifecycle.lastRuntimeEvent) }
+    }
+
+    @ViewBuilder private var recoveryActions: some View {
+        if let id = environment.lifecycle.affectedAppID, let app = environment.installed.first(where: { $0.id == id }) {
+            Button("Reopen \(app.manifest.name)") { Task { environment.lifecycle.resumeSession(); await environment.open(app) } }
+            Button(app.disabled ? "Re-enable App" : "Disable App") { Task { await environment.setDisabled(!app.disabled, id: id); environment.lifecycle.dismissRecovery() } }
+            Button("Roll Back App") { Task { await environment.rollback(id); environment.lifecycle.dismissRecovery() } }
+            Button("Delete App", role: .destructive) { Task { await environment.delete(id); environment.lifecycle.dismissRecovery() } }
+        }
+        Button("Continue Safely") { environment.lifecycle.dismissRecovery() }
+    }
+
+    private static func argumentValue(_ key: String, arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: key), arguments.indices.contains(index + 1) else { return nil }
+        return arguments[index + 1]
     }
 }
 
 private struct OnboardingView: View {
     var complete: () -> Void
     var body: some View {
-        NavigationStack { VStack(spacing: 24) { Spacer(); Image(systemName: "square.grid.3x3.square").font(.system(size: 72)).foregroundStyle(.tint); Text("PocketKernel").font(.largeTitle.bold()); Text("Describe small apps, preview the generated blueprint, and run them safely as native SwiftUI interfaces.").multilineTextAlignment(.center).foregroundStyle(.secondary); VStack(alignment: .leading, spacing: 12) { Label("On-device generation when Apple Intelligence is available", systemImage: "apple.intelligence"); Label("Typed actions—no downloaded code or JIT", systemImage: "checkmark.shield"); Label("Your apps and records stay on this device", systemImage: "lock.fill") }.frame(maxWidth: 420, alignment: .leading); Spacer(); Button("Get Started", action: complete).buttonStyle(.borderedProminent).controlSize(.large) }.padding(28).navigationTitle("Welcome") }
+        NavigationStack {
+            VStack(spacing: 24) {
+                Spacer()
+                Image(systemName: "square.grid.3x3.square").font(.system(size: 76)).foregroundStyle(.tint)
+                Text("PocketKernel").font(.largeTitle.bold())
+                Text("Describe, preview, install, and run multiple private native micro-apps without writing code.").multilineTextAlignment(.center).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("On-device generation with Apple Intelligence", systemImage: "apple.intelligence")
+                    Label("Typed native SwiftUI components and actions", systemImage: "checkmark.shield")
+                    Label("No JavaScript, JIT, downloaded binaries, or private APIs", systemImage: "lock.fill")
+                    Label("Local packages, records, permissions, and recovery", systemImage: "internaldrive")
+                }.frame(maxWidth: 460, alignment: .leading)
+                Spacer()
+                Button("Get Started", action: complete).buttonStyle(.borderedProminent).controlSize(.large)
+            }.padding(28).navigationTitle("Welcome")
+        }
+    }
+}
+
+private struct ModelStatusView: View {
+    @Environment(AppEnvironment.self) private var environment
+    var body: some View {
+        Label(environment.modelState.title, systemImage: environment.modelState == .available ? "apple.intelligence" : "square.grid.2x2")
+            .font(.caption).foregroundStyle(environment.modelState == .available ? .green : .secondary)
+            .accessibilityLabel("\(environment.modelState.title). \(environment.modelState.detail)")
     }
 }
 
@@ -50,193 +90,312 @@ private struct HomeView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var search = ""
     var create: () -> Void
-    private var filtered: [MicroAppManifest] { search.isEmpty ? environment.apps : environment.apps.filter { $0.name.localizedCaseInsensitiveContains(search) || $0.summary.localizedCaseInsensitiveContains(search) } }
-    var body: some View {
-        NavigationStack { ScrollView { LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 14) { Button(action: create) { VStack(spacing: 12) { Image(systemName: "plus.circle.fill").font(.largeTitle); Text("Create App").font(.headline) }.frame(maxWidth: .infinity, minHeight: 130).background(.tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 22)) }.buttonStyle(.plain).accessibilityHint("Opens the AI and template app builder"); ForEach(filtered) { app in NavigationLink { RuntimeView(manifest: app, store: environment.store) } label: { VStack(alignment: .leading, spacing: 10) { Image(systemName: app.icon.symbol).font(.title); Text(app.name).font(.headline); Text(app.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2) }.frame(maxWidth: .infinity, minHeight: 130, alignment: .leading).padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22)) }.buttonStyle(.plain) } }.padding() }.searchable(text: $search, prompt: "Search Pocket Apps").navigationTitle("PocketKernel").toolbar { ToolbarItem(placement: .topBarTrailing) { ModelStatusLabel() } } }
-    }
-}
 
-private struct ModelStatusLabel: View {
-    private var available: Bool { if case .available = SystemLanguageModel.default.availability { true } else { false } }
-    var body: some View { Label(available ? "AI Ready" : "Templates Ready", systemImage: available ? "apple.intelligence" : "square.grid.2x2").font(.caption).foregroundStyle(available ? .green : .secondary).accessibilityLabel(available ? "Apple Intelligence available" : "Apple Intelligence unavailable; templates available") }
+    private var visibleApps: [InstalledAppInfo] {
+        let apps = environment.installed.filter { !$0.disabled }
+        guard !search.isEmpty else { return apps }
+        return apps.filter { $0.manifest.name.localizedCaseInsensitiveContains(search) || $0.manifest.summary.localizedCaseInsensitiveContains(search) }
+    }
+    private var favorites: [InstalledAppInfo] { visibleApps.filter(\.favorite) }
+    private var recent: [InstalledAppInfo] { Array(visibleApps.filter { !$0.favorite }.prefix(8)) }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    statusCard
+                    Button(action: create) { Label("Create a Pocket App", systemImage: "plus.circle.fill").font(.headline).frame(maxWidth: .infinity, minHeight: 54) }.buttonStyle(.borderedProminent)
+                    if !favorites.isEmpty { appSection("Favorites", apps: favorites) }
+                    appSection(search.isEmpty ? "Recently Used" : "Search Results", apps: search.isEmpty ? recent : visibleApps)
+                }.padding()
+            }
+            .searchable(text: $search, prompt: "Search Pocket Apps")
+            .navigationTitle("PocketKernel")
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { ModelStatusView() } }
+            .refreshable { await environment.load() }
+        }
+    }
+
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(environment.modelState.title).font(.headline)
+            Text(environment.modelState.detail).font(.caption).foregroundStyle(.secondary)
+            HStack { Label("\(environment.installed.count) apps", systemImage: "square.grid.2x2"); Spacer(); Label(ByteCountFormatter.string(fromByteCount: environment.storageBytes, countStyle: .file), systemImage: "internaldrive") }.font(.caption)
+        }.padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    @ViewBuilder private func appSection(_ title: String, apps: [InstalledAppInfo]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.title3.bold())
+            if apps.isEmpty {
+                ContentUnavailableView("No Pocket Apps", systemImage: "square.grid.2x2", description: Text("Create or install an app to see it here."))
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 12)], spacing: 12) {
+                    ForEach(apps) { app in
+                        Button { Task { await environment.open(app) } } label: {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack { Image(systemName: app.manifest.icon.symbol).font(.title); Spacer(); if app.favorite { Image(systemName: "star.fill").foregroundStyle(.yellow) } }
+                                Text(app.manifest.name).font(.headline).lineLimit(1)
+                                Text(app.manifest.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }.frame(maxWidth: .infinity, minHeight: 125, alignment: .leading).padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                        }.buttonStyle(.plain).accessibilityLabel("\(app.manifest.name), \(app.manifest.summary)")
+                    }
+                }
+            }
+        }
+    }
 }
 
 private struct CreateView: View {
     @Environment(AppEnvironment.self) private var environment
-    @State private var prompt = "Create a car maintenance tracker with mileage, service date, cost, notes, and next-service reminders."
+    @State private var prompt = "Create a car maintenance tracker with mileage, service date, cost, notes, and reminders for the next service."
     @State private var selectedCapabilities: Set<PocketCapability> = []
-    private let suggestions = ["Habit tracker with daily streaks", "Inventory list with quantities", "Quick private journal", "Task board with status"]
+    @State private var showingManualEditor = false
+    private let suggestions = ["Habit tracker with daily check-ins", "Inventory manager with quantities and locations", "Private journal with dated entries", "Task board with status and due dates"]
+
     var body: some View {
-        @Bindable var environment = environment
-        NavigationStack { Form {
-            Section("Describe your app") { TextEditor(text: $prompt).frame(minHeight: 120).accessibilityLabel("App description"); ScrollView(.horizontal) { HStack { ForEach(suggestions, id: \.self) { suggestion in Button(suggestion) { prompt = suggestion }.buttonStyle(.bordered) } } }.scrollIndicators(.hidden) }
-            Button { Task { await environment.generate(prompt, capabilities: selectedCapabilities) } } label: { if environment.isGenerating { Label("Generating typed blueprint…", systemImage: "hourglass") } else { Label("Generate on device", systemImage: "sparkles") } }.disabled(environment.isGenerating || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Section("Capabilities") { ForEach(PocketCapability.allCases, id: \.self) { capability in Toggle(capability.rawValue, isOn: Binding(get: { selectedCapabilities.contains(capability) }, set: { enabled in if enabled { selectedCapabilities.insert(capability) } else { selectedCapabilities.remove(capability) } })) } }
-            if let error = environment.generationError { Section("Generation status") { Text(error).foregroundStyle(.secondary); Button("Retry") { Task { await environment.generate(prompt, capabilities: selectedCapabilities) } } } }
-            if let draft = environment.draft { Section("Validation") { let issues = ManifestValidator().validate(draft); if issues.isEmpty { Label("Blueprint passed every manifest gate", systemImage: "checkmark.shield.fill").foregroundStyle(.green) } else { ForEach(issues) { Label($0.message, systemImage: $0.severity == .error ? "xmark.octagon" : "exclamationmark.triangle") } } }; Section("Generated Preview") { Text("AI-generated blueprint—review before installing.").font(.caption).foregroundStyle(.secondary); RuntimeView(manifest: draft, store: nil).frame(minHeight: 320); Button("Install \(draft.name)") { Task { await environment.installDraft() } }.buttonStyle(.borderedProminent) } }
-        }.navigationTitle("Create") }
+        NavigationStack {
+            Form {
+                Section("Describe your app") {
+                    TextEditor(text: $prompt).frame(minHeight: 120).accessibilityLabel("App description")
+                    ScrollView(.horizontal) { HStack { ForEach(suggestions, id: \.self) { suggestion in Button(suggestion) { prompt = suggestion }.buttonStyle(.bordered) } } }.scrollIndicators(.hidden)
+                }
+                Section("Capabilities") {
+                    ForEach(PocketCapability.allCases, id: \.self) { capability in Toggle(capabilityTitle(capability), isOn: Binding(get: { selectedCapabilities.contains(capability) }, set: { enabled in if enabled { selectedCapabilities.insert(capability) } else { selectedCapabilities.remove(capability) } })) }
+                }
+                Section {
+                    Button { Task { await environment.generate(prompt, capabilities: selectedCapabilities) } } label: { if environment.isGenerating { Label("Generating and validating…", systemImage: "hourglass") } else { Label("Generate on Device", systemImage: "apple.intelligence") } }.disabled(environment.isGenerating || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Open Manual Builder", systemImage: "slider.horizontal.3") { ensureManualDraft(); showingManualEditor = true }
+                }
+                if let message = environment.generationError { Section("Generation Status") { Text(message).foregroundStyle(.secondary); Button("Retry") { Task { await environment.generate(prompt, capabilities: selectedCapabilities) } } } }
+                if let draft = environment.draft { draftSections(draft) }
+            }.navigationTitle("Create").sheet(isPresented: $showingManualEditor) { ManualBlueprintEditor() }
+        }
     }
+
+    @ViewBuilder private func draftSections(_ draft: MicroAppManifest) -> some View {
+        Section("Validation") {
+            if environment.validationIssues.isEmpty { Label("Blueprint passed every validation gate", systemImage: "checkmark.shield.fill").foregroundStyle(.green) }
+            else { ForEach(environment.validationIssues) { issue in Label(issue.message, systemImage: issue.severity == .error ? "xmark.octagon" : "exclamationmark.triangle").foregroundStyle(issue.severity == .error ? .red : .orange) } }
+        }
+        Section("Generated Preview") {
+            Text("AI-generated blueprint—review before installing.").font(.caption).foregroundStyle(.secondary)
+            NavigationLink("Open Full Preview") { RuntimeView(manifest: draft, previewOnly: true) }
+            HStack { Button("Undo", systemImage: "arrow.uturn.backward") { environment.undoDraft() }.disabled(environment.previousDraft == nil); Button("Edit", systemImage: "pencil") { showingManualEditor = true } }
+            Button("Install \(draft.name)") { Task { await environment.installDraft() } }.buttonStyle(.borderedProminent).disabled(environment.validationIssues.contains { $0.severity == .error })
+        }
+    }
+
+    private func ensureManualDraft() {
+        guard environment.draft == nil else { return }
+        environment.draft = BlueprintConverter().convert(.init(name: "My Pocket App", summary: "A custom local app", screens: [.init(id: "home", title: "Home", collectionID: "records")], collections: [.init(id: "records", title: "Records", fields: [.init(id: "title", title: "Title")])], actions: [.init(id: "add-record", title: "Add Record", kind: .createRecord, target: "records")]), capabilities: selectedCapabilities)
+        environment.validateDraft()
+    }
+
+    private func capabilityTitle(_ capability: PocketCapability) -> String {
+        switch capability {
+        case .clipboardRead: "Read Clipboard"
+        case .clipboardWrite: "Write Clipboard"
+        case .fileImport: "Import Files"
+        case .fileExport: "Export and Share"
+        case .photoSelection: "Select Photos"
+        case .camera: "Camera"
+        case .localNotifications: "Local Notifications"
+        case .network: "Approved HTTPS Requests"
+        case .onDeviceModel: "On-device AI Actions"
+        }
+    }
+}
+
+private struct ManualBlueprintEditor: View {
+    @Environment(AppEnvironment.self) private var environment
+    @Environment(\.dismiss) private var dismiss
+    @State private var newFieldTitle = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if environment.draft != nil {
+                    Section("App") { TextField("Name", text: binding(\.name)); TextField("Summary", text: binding(\.summary), axis: .vertical) }
+                    Section("Collections") {
+                        ForEach(environment.draft?.collections ?? []) { collection in
+                            DisclosureGroup(collection.title) {
+                                ForEach(collection.fields) { field in Label(field.title, systemImage: icon(field.kind)) }
+                                HStack { TextField("New field", text: $newFieldTitle); Button("Add") { addField(to: collection.id) }.disabled(newFieldTitle.trimmingCharacters(in: .whitespaces).isEmpty) }
+                            }
+                        }
+                        Button("Add Collection", systemImage: "plus") { addCollection() }
+                    }
+                    Section("Screens") { ForEach(environment.draft?.screens ?? []) { screen in Label(screen.title, systemImage: "rectangle") }; Button("Add Screen", systemImage: "plus") { addScreen() } }
+                    Section("Validation") { ForEach(environment.validationIssues) { Text($0.message) } }
+                }
+            }.navigationTitle("Blueprint Editor").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { environment.validateDraft(); dismiss() } } }
+        }
+    }
+
+    private func binding(_ keyPath: WritableKeyPath<MicroAppManifest, String>) -> Binding<String> { Binding(get: { environment.draft?[keyPath: keyPath] ?? "" }, set: { environment.draft?[keyPath: keyPath] = $0; environment.validateDraft() }) }
+    private func addField(to collectionID: String) { guard var draft = environment.draft, let index = draft.collections.firstIndex(where: { $0.id == collectionID }) else { return }; let id = slug(newFieldTitle); draft.collections[index].fields.append(.init(id: id, title: newFieldTitle, kind: .text, defaultValue: .string(""))); environment.draft = draft; newFieldTitle = ""; environment.validateDraft() }
+    private func addCollection() { guard var draft = environment.draft else { return }; let id = "collection-\(draft.collections.count + 1)"; draft.collections.append(.init(id: id, title: "Collection \(draft.collections.count + 1)", fields: [.init(id: "title", title: "Title")])); environment.draft = draft; environment.validateDraft() }
+    private func addScreen() { guard var draft = environment.draft, let collection = draft.collections.last else { return }; let id = "screen-\(draft.screens.count + 1)"; draft.screens.append(.init(id: id, title: collection.title, components: [.init(id: "\(id)-list", kind: .list, title: collection.title, collection: collection.id)])); environment.draft = draft; environment.validateDraft() }
+    private func slug(_ value: String) -> String { String(value.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }).split(separator: "-").joined(separator: "-") }
+    private func icon(_ kind: FieldKind) -> String { switch kind { case .number: "number"; case .boolean: "checkmark.circle"; case .date: "calendar"; case .image: "photo"; default: "textformat" } }
 }
 
 private struct LibraryView: View {
     @Environment(AppEnvironment.self) private var environment
     @State private var importing = false
     @State private var errorMessage: String?
-    private let templates = ["Task Board", "Habit Tracker", "Quick Journal", "Inventory List", "Service Log"]
+    @State private var renameApp: InstalledAppInfo?
+    @State private var renameText = ""
+
     var body: some View {
-        NavigationStack { List {
-            Section("Installed") { if environment.apps.isEmpty { Text("No installed apps").foregroundStyle(.secondary) }; ForEach(environment.apps) { app in NavigationLink { RuntimeView(manifest: app, store: environment.store) } label: { Label { VStack(alignment: .leading) { Text(app.name); Text(app.summary).font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: app.icon.symbol) } }.swipeActions { Button(role: .destructive) { Task { await environment.delete(app.id) } } label: { Label("Delete", systemImage: "trash") }; Button { Task { await environment.duplicate(app) } } label: { Label("Duplicate", systemImage: "plus.square.on.square") }.tint(.blue) }.contextMenu { if let data = environment.exportPackage(app) { ShareLink(item: data, preview: SharePreview("\(app.name).pocketapp")) { Label("Export Pocket App", systemImage: "square.and.arrow.up") } } } } }
-            Section("Built-in Templates") { ForEach(templates, id: \.self) { name in Button { Task { await environment.installTemplate(named: name) } } label: { Label(name, systemImage: "square.dashed") } } }
-        }.navigationTitle("Library").toolbar { Button("Import", systemImage: "square.and.arrow.down") { importing = true } }.fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in do { let url = try result.get(); guard url.startAccessingSecurityScopedResource() else { throw CocoaError(.fileReadNoPermission) }; defer { url.stopAccessingSecurityScopedResource() }; let data = try Data(contentsOf: url); Task { await environment.importPackage(data) } } catch { errorMessage = error.localizedDescription } }.alert("Import Failed", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) { Button("OK") { errorMessage = nil } } message: { Text(errorMessage ?? "Unknown import error") } }
+        NavigationStack {
+            List {
+                Section("Installed") {
+                    if environment.installed.isEmpty { ContentUnavailableView("No Installed Apps", systemImage: "square.grid.2x2", description: Text("Install a template, generate an app, or import a .pocketapp file.")) }
+                    ForEach(environment.installed) { app in appRow(app) }
+                }
+                Section("Built-in Templates") { ForEach(TemplateCatalog.all, id: \.name) { blueprint in Button { Task { await environment.installTemplate(blueprint) } } label: { Label(blueprint.name, systemImage: "square.dashed") } } }
+            }.navigationTitle("Library").toolbar { Button("Import", systemImage: "square.and.arrow.down") { importing = true } }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in importResult(result) }
+            .alert("Library Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) { Button("OK") {} } message: { Text(errorMessage ?? "Unknown error") }
+            .alert("Rename Pocket App", isPresented: Binding(get: { renameApp != nil }, set: { if !$0 { renameApp = nil } })) { TextField("Name", text: $renameText); Button("Rename") { if let renameApp { Task { await environment.rename(renameApp.id, name: renameText) } } }; Button("Cancel", role: .cancel) {} }
+        }
     }
+
+    private func appRow(_ app: InstalledAppInfo) -> some View {
+        Button { Task { await environment.open(app) } } label: { Label { VStack(alignment: .leading) { HStack { Text(app.manifest.name); if app.disabled { Text("Disabled").font(.caption).foregroundStyle(.orange) } }; Text(app.manifest.summary).font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: app.manifest.icon.symbol) } }.buttonStyle(.plain)
+        .swipeActions { Button(role: .destructive) { Task { await environment.delete(app.id) } } label: { Label("Delete", systemImage: "trash") }; Button { Task { await environment.toggleFavorite(app) } } label: { Label(app.favorite ? "Unfavorite" : "Favorite", systemImage: app.favorite ? "star.slash" : "star") }.tint(.yellow) }
+        .contextMenu { Button("Rename", systemImage: "pencil") { renameApp = app; renameText = app.manifest.name }; Button("Duplicate", systemImage: "plus.square.on.square") { Task { await environment.duplicate(app.id) } }; Button(app.disabled ? "Enable" : "Disable", systemImage: "power") { Task { await environment.setDisabled(!app.disabled, id: app.id) } }; Button("Roll Back", systemImage: "clock.arrow.circlepath") { Task { await environment.rollback(app.id) } }; Button("Export", systemImage: "square.and.arrow.up") { Task { do { _ = try await environment.exportPackage(app.manifest) } catch { errorMessage = error.localizedDescription } } } }
+    }
+
+    private func importResult(_ result: Result<URL, Error>) { do { let url = try result.get(); guard url.startAccessingSecurityScopedResource() else { throw CocoaError(.fileReadNoPermission) }; defer { url.stopAccessingSecurityScopedResource() }; let data = try Data(contentsOf: url); Task { do { try await environment.importPackage(data) } catch { errorMessage = error.localizedDescription } } } catch { errorMessage = error.localizedDescription } }
 }
 
 private struct ActivityView: View {
     @Environment(AppEnvironment.self) private var environment
+    @State private var filter = "All"
+    private let filters = ["All", "generation", "action", "permission", "import", "export", "runtime", "recovery"]
+    private var events: [ActivityEvent] { filter == "All" ? environment.activity : environment.activity.filter { $0.category == filter } }
+
     var body: some View {
         NavigationStack {
             List {
-                if environment.activity.isEmpty {
-                    ContentUnavailableView("No Activity Yet", systemImage: "clock", description: Text("Actions, permission decisions, imports, exports, and recoverable errors appear here."))
-                }
-                ForEach(environment.activity) { event in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Label(event.category.capitalized, systemImage: event.level == .error ? "xmark.octagon" : event.level == .warning ? "exclamationmark.triangle" : "checkmark.circle")
-                            Spacer()
-                            Text(event.createdAt, style: .relative).font(.caption)
-                        }
-                        Text(event.message).font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .refreshable { await environment.load() }
-            .navigationTitle("Activity")
+                Picker("Filter", selection: $filter) { ForEach(filters, id: \.self) { Text($0.capitalized).tag($0) } }.pickerStyle(.menu)
+                if events.isEmpty { ContentUnavailableView("No Activity Yet", systemImage: "clock", description: Text("Actions, permissions, generations, imports, exports, and recoverable errors appear here.")) }
+                ForEach(events) { event in VStack(alignment: .leading, spacing: 4) { HStack { Label(event.category.capitalized, systemImage: event.level == .error ? "xmark.octagon" : event.level == .warning ? "exclamationmark.triangle" : "checkmark.circle"); Spacer(); Text(event.createdAt, style: .relative).font(.caption) }; Text(event.message).font(.subheadline).foregroundStyle(.secondary) } }
+            }.navigationTitle("Activity").refreshable { await environment.load() }
         }
     }
 }
 
 private struct SettingsView: View {
     @Environment(AppEnvironment.self) private var environment
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
+    @AppStorage("PKPreferReducedMotion") private var preferReducedMotion = false
+    @AppStorage("PKDefaultPermission") private var defaultPermission = PermissionDecision.notRequested.rawValue
     @State private var confirmReset = false
-    private var modelStatus: String { if case .available = SystemLanguageModel.default.availability { "Available" } else { String(describing: SystemLanguageModel.default.availability) } }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("Apple Intelligence") {
-                    LabeledContent("On-device model", value: modelStatus)
-                    Text("When unavailable, PocketKernel keeps the manual builder, imports, and five templates enabled.").font(.caption).foregroundStyle(.secondary)
-                }
-                Section("Accessibility") {
-                    LabeledContent("Reduce Motion", value: reduceMotion ? "Enabled" : "Disabled")
-                    LabeledContent("Contrast", value: contrast == .increased ? "Increased" : "Standard")
-                }
-                Section("Storage") {
-                    LabeledContent("Installed Apps", value: "\(environment.apps.count)")
-                    Button("Reset All Local Data", role: .destructive) { confirmReset = true }
-                }
-                Section("Runtime Safety") {
-                    Label("Typed actions only", systemImage: "checkmark.shield")
-                    Label("HTTPS allowlists and permission broker", systemImage: "network.badge.shield.half.filled")
-                    Label("No JavaScript, WebAssembly, JIT, or native downloads", systemImage: "lock.fill")
-                }
-            }
-            .navigationTitle("Settings")
-            .confirmationDialog("Delete every Pocket App and record?", isPresented: $confirmReset, titleVisibility: .visible) {
-                Button("Delete All Local Data", role: .destructive) { Task { await environment.resetAllData() } }
-                Button("Cancel", role: .cancel) {}
-            }
+                Section("Apple Intelligence") { LabeledContent("Status", value: environment.modelState.title); Text(environment.modelState.detail).font(.caption).foregroundStyle(.secondary) }
+                Section("Data and Storage") { LabeledContent("Installed Apps", value: "\(environment.installed.count)"); LabeledContent("Database", value: ByteCountFormatter.string(fromByteCount: environment.storageBytes, countStyle: .file)); Button("Reset All Local Data", role: .destructive) { confirmReset = true } }
+                Section("Permissions") { Picker("Default decision", selection: $defaultPermission) { Text("Ask Every Time").tag(PermissionDecision.notRequested.rawValue); Text("Deny by Default").tag(PermissionDecision.denied.rawValue) } }
+                Section("Accessibility") { Toggle("Prefer Reduced Motion", isOn: $preferReducedMotion); LabeledContent("System Reduce Motion", value: systemReduceMotion ? "Enabled" : "Disabled"); LabeledContent("Contrast", value: contrast == .increased ? "Increased" : "Standard") }
+                Section("Developer Diagnostics") { LabeledContent("Model", value: environment.modelState.title); LabeledContent("Activity Events", value: "\(environment.activity.count)"); LabeledContent("Recovery", value: environment.lifecycle.recoveryRequired ? "Required" : "Clear"); Text("Swift 6 • iOS 26 • typed actions • SQLite • no executable packages").font(.caption).foregroundStyle(.secondary) }
+                Section("Runtime Safety") { Label("Typed actions only", systemImage: "checkmark.shield"); Label("HTTPS allowlists and explicit permission broker", systemImage: "network.badge.shield.half.filled"); Label("No JavaScript, WebAssembly, JIT, or native downloads", systemImage: "lock.fill") }
+            }.navigationTitle("Settings").confirmationDialog("Delete every Pocket App and record?", isPresented: $confirmReset, titleVisibility: .visible) { Button("Delete All Local Data", role: .destructive) { Task { await environment.resetAllData() } }; Button("Cancel", role: .cancel) {} }
         }
     }
 }
 
 struct RuntimeView: View {
     let manifest: MicroAppManifest
-    var store: PocketStore?
+    var previewOnly = false
     @Environment(AppEnvironment.self) private var environment
+    @Environment(\.dismiss) private var dismiss
     @State private var selectedScreenID: String
     @State private var recordsByCollection: [String: [PocketRecord]] = [:]
     @State private var runtimeValues: [String: PocketValue] = [:]
     @State private var executor: ActionExecutor?
     @State private var editingCollection: CollectionSpec?
-    @State private var formValues: [String: String] = [:]
+    @State private var formValues: [String: PocketValue] = [:]
+    @State private var pendingActionID: String?
+    @State private var permissionRequest: PermissionRequest?
     @State private var runtimeError: String?
     @State private var runtimeAlert: String?
-    @State private var permissionRequest: PermissionRequest?
-    @State private var pendingActionID: String?
     @State private var importing = false
     @State private var exporting = false
     @State private var exportDocument: PocketAppDocument?
-    @State private var shareText: String?
-    @Environment(\.dismiss) private var dismiss
+    @State private var sharingText: String?
 
-    init(manifest: MicroAppManifest, store: PocketStore? = nil) { self.manifest = manifest; self.store = store; _selectedScreenID = State(initialValue: manifest.entryScreenID) }
+    init(manifest: MicroAppManifest, previewOnly: Bool = false) { self.manifest = manifest; self.previewOnly = previewOnly; _selectedScreenID = State(initialValue: manifest.entryScreenID) }
     private var screen: ScreenSpec? { manifest.screens.first { $0.id == selectedScreenID } ?? manifest.screens.first }
 
     var body: some View {
-        List { if let screen { ForEach(screen.components) { component in ComponentRenderer(component: component, recordsByCollection: recordsByCollection, runtimeValues: $runtimeValues, runAction: runAction, importFile: { importing = true }, exportFile: prepareExport) } } else { ContentUnavailableView("Invalid Screen", systemImage: "exclamationmark.triangle", description: Text("The entry screen is missing.")) } }
-            .navigationTitle(screen?.title ?? manifest.name)
-            .task { if let store { executor = ActionExecutor(store: store); environment.lifecycle.markRuntimeOpen(appID: manifest.id) }; await reload() }
-            .onChange(of: runtimeValues) { _, values in guard let store else { return }; Task { for (key, value) in values { try? await store.setRuntimeValue(value, appID: manifest.id, key: key) } } }
-            .sheet(item: $editingCollection) { collection in recordForm(collection) }
-            .fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in if case .success(let url) = result, url.startAccessingSecurityScopedResource() { defer { url.stopAccessingSecurityScopedResource() }; if let data = try? Data(contentsOf: url) { Task { await environment.importPackage(data) } } } }
-            .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .pocketApp, defaultFilename: manifest.name) { result in if case .failure(let error) = result { runtimeError = error.localizedDescription } }
-            .sheet(isPresented: Binding(get: { shareText != nil }, set: { if !$0 { shareText = nil } })) { ShareSheet(text: shareText ?? "") }
-            .alert("Runtime Error", isPresented: Binding(get: { runtimeError != nil }, set: { if !$0 { runtimeError = nil } })) { Button("Retry") { if let id = pendingActionID { runAction(id) } }; Button("Dismiss", role: .cancel) { runtimeError = nil } } message: { Text(runtimeError ?? "Unknown error") }
-            .alert("Pocket App", isPresented: Binding(get: { runtimeAlert != nil }, set: { if !$0 { runtimeAlert = nil } })) { Button("OK") { runtimeAlert = nil } } message: { Text(runtimeAlert ?? "") }
-            .confirmationDialog(permissionTitle, isPresented: Binding(get: { permissionRequest != nil }, set: { if !$0 { permissionRequest = nil } }), titleVisibility: .visible) { Button("Allow Once") { decidePermission(.allowOnce) }; Button("Always Allow") { decidePermission(.alwaysAllow) }; Button("Don't Allow", role: .destructive) { decidePermission(.denied) } } message: { Text(permissionRequest?.reason ?? "This action requires permission.") }
+        List {
+            if manifest.screens.count > 1 { Picker("Screen", selection: $selectedScreenID) { ForEach(manifest.screens) { Text($0.title).tag($0.id) } }.pickerStyle(.segmented) }
+            if let screen { ForEach(screen.components) { component in ComponentRenderer(component: component, recordsByCollection: recordsByCollection, runtimeValues: $runtimeValues, runAction: runAction, importFile: { importing = true }, exportFile: prepareExport) } }
+            else { ContentUnavailableView("Invalid Screen", systemImage: "exclamationmark.triangle", description: Text("The entry screen is missing.")) }
+        }
+        .navigationTitle(screen?.title ?? manifest.name)
+        .toolbar { if !previewOnly { ToolbarItem(placement: .topBarTrailing) { Button("Done") { environment.lifecycle.markRuntimeClosed(); dismiss() } } } }
+        .task { await startRuntime() }
+        .onDisappear { if !previewOnly { environment.lifecycle.markRuntimeClosed() } }
+        .onChange(of: runtimeValues) { _, values in persist(values) }
+        .sheet(item: $editingCollection) { collection in recordForm(collection) }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in importRuntimeFile(result) }
+        .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .pocketApp, defaultFilename: manifest.name) { if case .failure(let error) = $0 { runtimeError = error.localizedDescription } }
+        .sheet(isPresented: Binding(get: { sharingText != nil }, set: { if !$0 { sharingText = nil } })) { ShareLink(item: sharingText ?? "") { Label("Share", systemImage: "square.and.arrow.up") }.padding() }
+        .alert("Pocket App", isPresented: Binding(get: { runtimeAlert != nil }, set: { if !$0 { runtimeAlert = nil } })) { Button("OK") {} } message: { Text(runtimeAlert ?? "") }
+        .alert("Runtime Error", isPresented: Binding(get: { runtimeError != nil }, set: { if !$0 { runtimeError = nil } })) { Button("Retry") { if let pendingActionID { runAction(pendingActionID) } }; Button("Dismiss", role: .cancel) {} } message: { Text(runtimeError ?? "") }
+        .confirmationDialog(permissionRequest.map { "\($0.appName) requests \($0.capability.rawValue)" } ?? "Permission", isPresented: Binding(get: { permissionRequest != nil }, set: { if !$0 { permissionRequest = nil } }), titleVisibility: .visible) { permissionButtons } message: { Text(permissionRequest?.reason ?? "") }
     }
 
-    private var permissionTitle: String { guard let request = permissionRequest else { return "Permission Request" }; return "\(request.appName) wants \(request.capability.rawValue)" }
-    private func runAction(_ id: String) {
-        pendingActionID = id
-        guard let action = manifest.actions.first(where: { $0.id == id }) else { runtimeError = "Action not found."; return }
-        if action.kind == .createRecord, let collection = manifest.collections.first(where: { $0.id == action.target }) { formValues = Dictionary(uniqueKeysWithValues: collection.fields.map { ($0.id, "") }); editingCollection = collection; return }
-        guard let executor else { runtimeError = store == nil ? "Preview mode does not execute actions." : "Runtime is still starting."; return }
-        let context: [String: PocketValue] = ["state": .object(runtimeValues), "environment": .object(["currentDate": .date(Date())])]
-        Task { do { let result = try await executor.execute(id, manifest: manifest, context: context); apply(result); await reload(); await environment.load() } catch RuntimeExecutionError.permissionRequired(let request) { permissionRequest = request } catch RuntimeExecutionError.conditionFalse { } catch { runtimeError = error.localizedDescription } }
+    @ViewBuilder private var permissionButtons: some View { Button("Don’t Allow", role: .destructive) { decide(.denied) }; Button("Allow Once") { decide(.allowOnce) }; Button("Always Allow") { decide(.alwaysAllow) }; Button("Cancel", role: .cancel) { permissionRequest = nil } }
+
+    private func startRuntime() async { guard !previewOnly, let store = environment.store else { return }; executor = ActionExecutor(store: store, intelligence: environment.intelligence); environment.lifecycle.markRuntimeOpen(appID: manifest.id); await reload() }
+    private func reload() async { guard !previewOnly, let store = environment.store else { return }; for collection in manifest.collections { recordsByCollection[collection.id] = (try? await store.records(appID: manifest.id, collectionID: collection.id)) ?? [] }; runtimeValues = (try? await store.runtimeValues(appID: manifest.id)) ?? [:] }
+    private func runAction(_ id: String) { guard !previewOnly, let action = manifest.actions.first(where: { $0.id == id }) else { return }; pendingActionID = id; if action.kind == .createRecord, let target = action.target, let collection = manifest.collections.first(where: { $0.id == target }) { formValues = Dictionary(uniqueKeysWithValues: collection.fields.map { ($0.id, $0.defaultValue) }); editingCollection = collection; return }; execute(id, form: [:]) }
+    private func execute(_ id: String, form: [String: PocketValue]) { guard let executor else { return }; Task { do { let collections = recordsByCollection.mapValues { PocketValue.array($0.map { .object($0.values) }) }; let context: [String: PocketValue] = ["state": .object(runtimeValues), "form": .object(form), "collections": .object(collections), "environment": .object(["currentDate": .date(Date())])]; let result = try await executor.execute(id, manifest: manifest, context: context); await apply(result); await reload() } catch RuntimeExecutionError.permissionRequired(let request) { permissionRequest = request } catch { runtimeError = error.localizedDescription } } }
+
+    @MainActor private func apply(_ result: ActionResult) async {
+        switch result {
+        case .none: break
+        case .value(let value): runtimeValues["lastResult"] = value
+        case .navigated(let id): selectedScreenID = id
+        case .alert(let text): runtimeAlert = text
+        case .record: break
+        case .records(let records): if let collection = records.first?.collectionID { recordsByCollection[collection] = records }
+        case .host(let request):
+            switch request {
+            case .dismiss: dismiss()
+            case .sheet(let title): runtimeAlert = title
+            case .share(let text): sharingText = text
+            case .importFile: importing = true
+            case .exportFile: prepareExport()
+            case .selectPhotos: runtimeAlert = "Use a photo picker component to select an image."
+            case .openURL(let value): if let url = URL(string: value) { await UIApplication.shared.open(url) }
+            }
+        }
     }
 
-    @MainActor private func apply(_ result: ActionResult) {
-        switch result { case .none, .record: break; case .value(let value): runtimeValues["lastResult"] = value; case .navigated(let screenID): if manifest.screens.contains(where: { $0.id == screenID }) { selectedScreenID = screenID }; case .alert(let message): runtimeAlert = message; case .host(let request): handle(request) }
+    private func decide(_ decision: PermissionDecision) { guard let request = permissionRequest, let executor, let actionID = pendingActionID else { return }; Task { do { try await executor.decide(decision, request: request); permissionRequest = nil; if decision != .denied { execute(actionID, form: [:]) } } catch { runtimeError = error.localizedDescription } } }
+    private func recordForm(_ collection: CollectionSpec) -> some View { NavigationStack { Form { ForEach(collection.fields) { field in fieldEditor(field) } }.navigationTitle("Add \(collection.title)").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingCollection = nil } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { if let action = manifest.actions.first(where: { $0.kind == .createRecord && $0.target == collection.id }) { editingCollection = nil; execute(action.id, form: formValues) } } } } } }
+
+    @ViewBuilder private func fieldEditor(_ field: FieldSpec) -> some View {
+        switch field.kind {
+        case .text, .choice, .image: TextField(field.title, text: Binding(get: { formValues[field.id]?.displayString ?? "" }, set: { formValues[field.id] = .string($0) }))
+        case .multilineText: TextField(field.title, text: Binding(get: { formValues[field.id]?.displayString ?? "" }, set: { formValues[field.id] = .string($0) }), axis: .vertical).lineLimit(3...8)
+        case .number: TextField(field.title, value: Binding(get: { if case .number(let value) = formValues[field.id] { value } else { 0 } }, set: { formValues[field.id] = .number($0) }), format: .number).keyboardType(.decimalPad)
+        case .boolean: Toggle(field.title, isOn: Binding(get: { if case .bool(let value) = formValues[field.id] { value } else { false } }, set: { formValues[field.id] = .bool($0) }))
+        case .date: DatePicker(field.title, selection: Binding(get: { if case .date(let value) = formValues[field.id] { value } else { Date() } }, set: { formValues[field.id] = .date($0) }))
+        }
     }
 
-    @MainActor private func handle(_ request: HostRequest) {
-        switch request { case .dismiss: dismiss(); case .sheet(let title): runtimeAlert = title; case .share(let text): shareText = text; case .importFile: importing = true; case .exportFile: prepareExport(); case .selectPhotos: runtimeAlert = "Use the photo picker component to select an image."; case .openURL(let value): if let url = URL(string: value) { UIApplication.shared.open(url) } }
-    }
-
-    private func decidePermission(_ decision: PermissionDecision) {
-        guard let request = permissionRequest, let executor else { permissionRequest = nil; return }
-        permissionRequest = nil
-        Task { do { try await executor.decide(decision, request: request); if let store { try? await store.log(appID: manifest.id, level: decision == .denied ? .warning : .info, category: "permission", message: "\(decision.rawValue): \(request.capability.rawValue)") }; if decision != .denied, let id = pendingActionID { runAction(id) } } catch { runtimeError = error.localizedDescription } }
-    }
-
-    private func recordForm(_ collection: CollectionSpec) -> some View {
-        NavigationStack { Form { ForEach(collection.fields) { field in TextField(field.title, text: Binding(get: { formValues[field.id, default: ""] }, set: { formValues[field.id] = $0 })) } }.navigationTitle("Add \(collection.title)").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingCollection = nil } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save(collection) } } } } }
-    }
-
-    private func save(_ collection: CollectionSpec) async {
-        guard let store else { editingCollection = nil; return }
-        let now = Date(); let values = formValues.mapValues { PocketValue.string($0) }
-        do { try await store.save(record: .init(id: UUID(), collectionID: collection.id, values: values, createdAt: now, updatedAt: now), appID: manifest.id); try await store.log(appID: manifest.id, level: .info, category: "record", message: "Created record in \(collection.title)"); editingCollection = nil; await reload() } catch { runtimeError = error.localizedDescription }
-    }
-
-    private func reload() async { guard let store else { return }; for collection in manifest.collections { recordsByCollection[collection.id] = (try? await store.records(appID: manifest.id, collectionID: collection.id)) ?? [] } }
-    private func prepareExport() { guard let data = environment.exportPackage(manifest) else { runtimeError = "Package export failed."; return }; exportDocument = PocketAppDocument(data: data); exporting = true }
-}
-
-struct PocketAppDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.pocketApp] }
-    let data: Data
-    init(data: Data) { self.data = data }
-    init(configuration: ReadConfiguration) throws { guard let data = configuration.file.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }; self.data = data }
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
-}
-
-private struct ShareSheet: UIViewControllerRepresentable {
-    let text: String
-    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: [text], applicationActivities: nil) }
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+    private func persist(_ values: [String: PocketValue]) { guard !previewOnly, let store = environment.store else { return }; Task { for (key, value) in values { try? await store.setRuntimeValue(value, appID: manifest.id, key: key) } } }
+    private func prepareExport() { guard !previewOnly else { return }; Task { do { let data = try await environment.exportPackage(manifest); exportDocument = .init(data: data); exporting = true } catch { runtimeError = error.localizedDescription } } }
+    private func importRuntimeFile(_ result: Result<URL, Error>) { do { let url = try result.get(); guard url.startAccessingSecurityScopedResource() else { throw CocoaError(.fileReadNoPermission) }; defer { url.stopAccessingSecurityScopedResource() }; let data = try Data(contentsOf: url); Task { do { try await environment.importPackage(data) } catch { runtimeError = error.localizedDescription } } } catch { runtimeError = error.localizedDescription } }
 }
