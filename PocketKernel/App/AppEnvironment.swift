@@ -31,6 +31,7 @@ enum ModelAvailabilityState: Sendable, Equatable {
     private(set) var store: PocketStore?
     private(set) var lifecycle: AppLifecycleController
     private(set) var installed: [InstalledAppInfo] = []
+    private(set) var builtInTemplates: [BundledTemplate] = []
     private(set) var activity: [ActivityEvent] = []
     private(set) var storageBytes: Int64 = 0
     private(set) var modelState: ModelAvailabilityState
@@ -57,6 +58,9 @@ enum ModelAvailabilityState: Sendable, Equatable {
         do { store = try PocketStore(inMemory: arguments.contains("-PKInMemoryStore")) }
         catch { startupError = error.localizedDescription; store = nil }
 
+        do { builtInTemplates = try TemplatePackageLibrary().load() }
+        catch { if startupError == nil { startupError = "Built-in Pocket Apps could not be loaded: \(error.localizedDescription)" } }
+
         switch AppEnvironment.argumentValue("-PKModelMode", arguments: arguments) {
         case "mock":
             generator = MockBlueprintGenerator()
@@ -78,6 +82,7 @@ enum ModelAvailabilityState: Sendable, Equatable {
     func load() async {
         guard let store else { return }
         do {
+            if builtInTemplates.isEmpty { builtInTemplates = try TemplatePackageLibrary().load() }
             if launchArguments.contains("-PKResetDatabase"), !didApplyLaunchReset {
                 try await store.reset()
                 didApplyLaunchReset = true
@@ -86,7 +91,9 @@ enum ModelAvailabilityState: Sendable, Equatable {
             activity = try await store.activity()
             storageBytes = try await store.storageBytes()
             syncIntentEntities()
-            if let requested = UserDefaults.standard.string(forKey: "PKRequestedAppID"), let id = UUID(uuidString: requested), let app = installed.first(where: { $0.id == id && !$0.disabled }) {
+            if let requested = UserDefaults.standard.string(forKey: "PKRequestedAppID"),
+               let id = UUID(uuidString: requested),
+               let app = installed.first(where: { $0.id == id && !$0.disabled }) {
                 pendingOpenApp = app.manifest
                 UserDefaults.standard.removeObject(forKey: "PKRequestedAppID")
             }
@@ -155,12 +162,11 @@ enum ModelAvailabilityState: Sendable, Equatable {
         } catch { generationError = error.localizedDescription }
     }
 
-    func installTemplate(_ blueprint: MicroAppBlueprint) async {
+    func installTemplate(_ template: BundledTemplate) async {
         guard let store else { return }
         do {
-            let manifest = BlueprintConverter().convert(blueprint, capabilities: blueprint == TemplateCatalog.serviceLogBlueprint ? [.localNotifications] : [])
-            try await store.install(PackageCodec().makePackage(manifest: manifest))
-            try await store.log(appID: manifest.id, level: .info, category: "install", message: "Installed built-in template \(manifest.name).")
+            try await store.install(template.package)
+            try await store.log(appID: template.id, level: .info, category: "install", message: "Installed built-in package \(template.manifest.name).")
             await load()
         } catch { startupError = error.localizedDescription }
     }
@@ -273,7 +279,9 @@ enum ModelAvailabilityState: Sendable, Equatable {
             exports: root.appending(path: "Exports", directoryHint: .isDirectory),
             recovery: root.appending(path: "Recovery", directoryHint: .isDirectory)
         )
-        for directory in [layout.root, layout.packages, layout.assets, layout.exports, layout.recovery] { try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
+        for directory in [layout.root, layout.packages, layout.assets, layout.exports, layout.recovery] {
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
         return layout
     }
 }
