@@ -1,0 +1,363 @@
+name: Apply PocketKernel Runtime FVP Fix
+
+on:
+  push:
+    branches: [pocketkernel-1.0-full-rebuild]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+      - name: Apply runtime, UI, and test changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              source = p.read_text()
+              if old not in source:
+                  raise SystemExit(f"Expected source not found in {path}: {old[:100]!r}")
+              p.write_text(source.replace(old, new, 1))
+
+          runtime = 'PocketKernel/Runtime/RuntimeEngine.swift'
+          replace_once(runtime,
+          '''actor ActionExecutor {
+              private let store: PocketStore
+              private let broker: PermissionBroker
+              private let intelligence: any IntelligenceServicing
+          ''',
+          '''actor ActionExecutor {
+              private enum UndoOperation: Sendable {
+                  case restoreRuntimeValue(appID: UUID, key: String, previous: PocketValue?)
+                  case deleteCreatedRecord(appID: UUID, collectionID: String, recordID: UUID)
+                  case restoreRecord(appID: UUID, record: PocketRecord)
+              }
+
+              private let store: PocketStore
+              private let broker: PermissionBroker
+              private let intelligence: any IntelligenceServicing
+              private var undoStack: [UndoOperation] = []
+          ''')
+
+          replace_once(runtime,
+          '''    func decide(_ decision: PermissionDecision, request: PermissionRequest) async throws {
+                  try await broker.decide(decision, request: request)
+              }
+
+              private func execute(
+          ''',
+          '''    func decide(_ decision: PermissionDecision, request: PermissionRequest) async throws {
+                  try await broker.decide(decision, request: request)
+              }
+
+              func canUndo() -> Bool {
+                  !undoStack.isEmpty
+              }
+
+              func undoLast() async throws -> ActionResult {
+                  guard let operation = undoStack.popLast() else { return .none }
+                  switch operation {
+                  case .restoreRuntimeValue(let appID, let key, let previous):
+                      try await store.setRuntimeValue(previous, appID: appID, key: key)
+                      return .value(previous ?? .null)
+                  case .deleteCreatedRecord(let appID, let collectionID, let recordID):
+                      try await store.deleteRecord(appID: appID, collectionID: collectionID, recordID: recordID)
+                      return .none
+                  case .restoreRecord(let appID, let record):
+                      try await store.save(record: record, appID: appID)
+                      return .record(record)
+                  }
+              }
+
+              private func registerUndo(_ operation: UndoOperation) {
+                  undoStack.append(operation)
+                  if undoStack.count > 100 { undoStack.removeFirst(undoStack.count - 100) }
+              }
+
+              private func execute(
+          ''')
+
+          replace_once(runtime,
+          '''        case .setValue:
+                      guard let key = action.target else { throw RuntimeExecutionError.invalidParameter("target") }
+                      let value = action.value ?? .null
+                      try await store.setRuntimeValue(value, appID: manifest.id, key: normalizedStateKey(key))
+                      return .value(value)
+
+                  case .clearValue:
+                      guard let key = action.target else { throw RuntimeExecutionError.invalidParameter("target") }
+                      try await store.setRuntimeValue(nil, appID: manifest.id, key: normalizedStateKey(key))
+                      return .none
+          ''',
+          '''        case .setValue:
+                      guard let key = action.target else { throw RuntimeExecutionError.invalidParameter("target") }
+                      let normalizedKey = normalizedStateKey(key)
+                      let previous = try await store.runtimeValue(appID: manifest.id, key: normalizedKey)
+                      let value = action.value ?? .null
+                      try await store.setRuntimeValue(value, appID: manifest.id, key: normalizedKey)
+                      registerUndo(.restoreRuntimeValue(appID: manifest.id, key: normalizedKey, previous: previous))
+                      return .value(value)
+
+                  case .clearValue:
+                      guard let key = action.target else { throw RuntimeExecutionError.invalidParameter("target") }
+                      let normalizedKey = normalizedStateKey(key)
+                      let previous = try await store.runtimeValue(appID: manifest.id, key: normalizedKey)
+                      try await store.setRuntimeValue(nil, appID: manifest.id, key: normalizedKey)
+                      registerUndo(.restoreRuntimeValue(appID: manifest.id, key: normalizedKey, previous: previous))
+                      return .none
+          ''')
+
+          replace_once(runtime,
+          '''            try await store.save(record: record, appID: manifest.id)
+                      return .record(record)
+
+                  case .updateRecord:
+          ''',
+          '''            try await store.save(record: record, appID: manifest.id)
+                      registerUndo(.deleteCreatedRecord(appID: manifest.id, collectionID: collectionID, recordID: record.id))
+                      return .record(record)
+
+                  case .updateRecord:
+          ''')
+
+          replace_once(runtime,
+          '''            guard var record = try await store.records(appID: manifest.id, collectionID: collectionID)
+                          .first(where: { $0.id == id })
+                      else { throw RuntimeExecutionError.invalidParameter("recordID") }
+                      let form = object(context["form"]) ?? [:]
+          ''',
+          '''            guard var record = try await store.records(appID: manifest.id, collectionID: collectionID)
+                          .first(where: { $0.id == id })
+                      else { throw RuntimeExecutionError.invalidParameter("recordID") }
+                      let previous = record
+                      let form = object(context["form"]) ?? [:]
+          ''')
+
+          replace_once(runtime,
+          '''            record.updatedAt = Date()
+                      try await store.save(record: record, appID: manifest.id)
+                      return .record(record)
+
+                  case .deleteRecord:
+          ''',
+          '''            record.updatedAt = Date()
+                      try await store.save(record: record, appID: manifest.id)
+                      registerUndo(.restoreRecord(appID: manifest.id, record: previous))
+                      return .record(record)
+
+                  case .deleteRecord:
+          ''')
+
+          replace_once(runtime,
+          '''        case .deleteRecord:
+                      guard let collectionID = action.target,
+                            let id = recordID(action: action, context: context)
+                      else { throw RuntimeExecutionError.invalidParameter("recordID") }
+                      try await store.deleteRecord(appID: manifest.id, collectionID: collectionID, recordID: id)
+                      return .none
+          ''',
+          '''        case .deleteRecord:
+                      guard let collectionID = action.target,
+                            let id = recordID(action: action, context: context)
+                      else { throw RuntimeExecutionError.invalidParameter("recordID") }
+                      guard let previous = try await store.records(appID: manifest.id, collectionID: collectionID)
+                          .first(where: { $0.id == id })
+                      else { throw RuntimeExecutionError.invalidParameter("recordID") }
+                      try await store.deleteRecord(appID: manifest.id, collectionID: collectionID, recordID: id)
+                      registerUndo(.restoreRecord(appID: manifest.id, record: previous))
+                      return .none
+          ''')
+
+          root = 'PocketKernel/Shell/RootTabView.swift'
+          replace_once(root,
+          '''    @State private var actionPhotoRecognizeText = false
+          ''',
+          '''    @State private var actionPhotoRecognizeText = false
+              @State private var canUndo = false
+          ''')
+
+          replace_once(root,
+          '''    private var collectionSpecs: [String: CollectionSpec] { Dictionary(uniqueKeysWithValues: manifest.collections.map { ($0.id, $0) }) }
+          ''',
+          '''    private var collectionSpecs: [String: CollectionSpec] { Dictionary(uniqueKeysWithValues: manifest.collections.map { ($0.id, $0) }) }
+              private var permissionDialogTitle: String {
+                  guard let request = permissionRequest else { return "Permission" }
+                  return request.appName + " requests " + request.capability.displayName
+              }
+          ''')
+
+          replace_once(root,
+          '''        .toolbar {
+                      if !previewOnly {
+                          ToolbarItem(placement: .topBarTrailing) { Button("Done") { environment.lifecycle.markRuntimeClosed(); dismiss() } }
+                      }
+                  }
+          ''',
+          '''        .toolbar {
+                      if !previewOnly {
+                          ToolbarItemGroup(placement: .topBarTrailing) {
+                              Button { undoLast() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                                  .disabled(!canUndo)
+                              Button("Done") { environment.lifecycle.markRuntimeClosed(); dismiss() }
+                          }
+                      }
+                  }
+          ''')
+
+          replace_once(root,
+          '''        .confirmationDialog(
+                      permissionRequest.map { "\($0.appName) requests \($0.capability.displayName)" } ?? "Permission",
+          ''',
+          '''        .confirmationDialog(
+                      permissionDialogTitle,
+          ''')
+
+          replace_once(root,
+          '''        executor = ActionExecutor(store: store, intelligence: environment.intelligence, defaultPermission: configured)
+                  environment.lifecycle.markRuntimeOpen(appID: manifest.id)
+          ''',
+          '''        executor = ActionExecutor(store: store, intelligence: environment.intelligence, defaultPermission: configured)
+                  canUndo = false
+                  environment.lifecycle.markRuntimeOpen(appID: manifest.id)
+          ''')
+
+          replace_once(root,
+          '''                let result = try await executor.execute(id, manifest: manifest, context: context)
+                          await apply(result)
+                          await reload()
+          ''',
+          '''                let result = try await executor.execute(id, manifest: manifest, context: context)
+                          await apply(result)
+                          await reload()
+                          canUndo = await executor.canUndo()
+          ''')
+
+          replace_once(root,
+          '''    @MainActor private func apply(_ result: ActionResult) async {
+          ''',
+          '''    private func undoLast() {
+                  guard let executor else { return }
+                  Task {
+                      do {
+                          let result = try await executor.undoLast()
+                          await apply(result)
+                          await reload()
+                          canUndo = await executor.canUndo()
+                      } catch { runtimeError = error.localizedDescription }
+                  }
+              }
+
+              @MainActor private func apply(_ result: ActionResult) async {
+          ''')
+
+          replace_once(root,
+          '''        case .image:
+                      PhotosPicker(selection: formPhotoBinding(for: field.id), matching: .images) {
+                          Label(formValues[field.id] == nil ? "Choose \(field.title)" : "Replace \(field.title)", systemImage: "photo.on.rectangle")
+                      }
+          ''',
+          '''        case .image:
+                      let hasImage = formValues[field.id] != nil
+                      PhotosPicker(selection: formPhotoBinding(for: field.id), matching: .images) {
+                          Label(hasImage ? "Replace \(field.title)" : "Choose \(field.title)", systemImage: "photo.on.rectangle")
+                      }
+          ''')
+
+          tests = 'PocketKernelTests/PocketKernelTests.swift'
+          replace_once(tests,
+          '''    func testMockBlueprintIsDeterministic() async throws {
+          ''',
+          '''    func testConverterPreservesGeneratedLayoutAndActionMetadata() {
+                  let blueprint = MicroAppBlueprint(
+                      name: "Flexible App",
+                      summary: "A custom layout",
+                      screens: [
+                          .init(id: "dashboard", title: "Dashboard", components: [
+                              .init(id: "custom-card", kind: .card, children: [
+                                  .init(id: "custom-metric", kind: .metric, title: "Total", text: "{{ count(collections.entries) }}")
+                              ]),
+                              .init(id: "custom-button", kind: .button, title: "Next", actionID: "go-next")
+                          ]),
+                          .init(id: "details", title: "Details", components: [
+                              .init(id: "entry-grid", kind: .grid, collection: "entries", sortField: "amount", sortAscending: false)
+                          ])
+                      ],
+                      collections: [.init(id: "entries", title: "Entries", fields: [
+                          .init(id: "amount", title: "Amount", kind: .number, required: true)
+                      ])],
+                      actions: [.init(
+                          id: "go-next",
+                          title: "Next",
+                          kind: .navigate,
+                          target: "details",
+                          condition: "count(collections.entries) >= 0",
+                          parameters: ["source": .string("dashboard")]
+                      )]
+                  )
+                  let manifest = BlueprintConverter().convert(blueprint, capabilities: [])
+                  XCTAssertEqual(manifest.screens[0].components[0].kind, .card)
+                  XCTAssertEqual(manifest.screens[0].components[0].children.first?.id, "custom-metric")
+                  XCTAssertEqual(manifest.screens[1].components.first?.kind, .grid)
+                  XCTAssertEqual(manifest.actions.first?.condition, "count(collections.entries) >= 0")
+                  XCTAssertEqual(manifest.actions.first?.parameters["source"], .string("dashboard"))
+              }
+
+              func testMockBlueprintIsDeterministic() async throws {
+          ''')
+
+          replace_once(tests,
+          '''    func testActionChainLoopIsRejected() async throws {
+          ''',
+          '''    func testSessionUndoRestoresStateAndRecords() async throws {
+                  let store = try PocketStore(inMemory: true)
+                  var manifest = BlueprintConverter().convert(TemplateCatalog.inventoryBlueprint, capabilities: [])
+                  manifest.actions.append(.init(id: "set-filter", kind: .setValue, target: "state.filter", value: .string("active")))
+                  manifest.actions.append(.init(id: "delete-item", kind: .deleteRecord, target: "items"))
+                  let executor = ActionExecutor(store: store, intelligence: MockIntelligenceService())
+
+                  _ = try await executor.execute("set-filter", manifest: manifest, context: [:])
+                  let activeFilter = try await store.runtimeValue(appID: manifest.id, key: "filter")
+                  XCTAssertEqual(activeFilter, .string("active"))
+                  _ = try await executor.undoLast()
+                  let clearedFilter = try await store.runtimeValue(appID: manifest.id, key: "filter")
+                  XCTAssertNil(clearedFilter)
+
+                  let create = manifest.actions.first { $0.kind == .createRecord }!
+                  guard case .record(let record) = try await executor.execute(
+                      create.id,
+                      manifest: manifest,
+                      context: ["form": .object(["name": .string("Undo Item"), "quantity": .number(1)])]
+                  ) else { return XCTFail("Expected created record") }
+                  _ = try await executor.execute(
+                      "delete-item",
+                      manifest: manifest,
+                      context: ["selectedRecordID": .string(record.id.uuidString)]
+                  )
+                  let deletedRecords = try await store.records(appID: manifest.id, collectionID: "items")
+                  XCTAssertTrue(deletedRecords.isEmpty)
+                  _ = try await executor.undoLast()
+                  let restoredRecords = try await store.records(appID: manifest.id, collectionID: "items")
+                  XCTAssertEqual(restoredRecords, [record])
+              }
+
+              func testActionChainLoopIsRejected() async throws {
+          ''')
+
+          Path('.github/workflows/apply-fvp-runtime-fix.yml').unlink()
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PocketKernel/Runtime/RuntimeEngine.swift PocketKernel/Shell/RootTabView.swift PocketKernelTests/PocketKernelTests.swift .github/workflows/apply-fvp-runtime-fix.yml
+          git commit -m 'Add runtime undo and verify generated layouts'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
