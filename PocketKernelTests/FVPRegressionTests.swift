@@ -71,6 +71,7 @@ final class FVPRegressionTests: XCTestCase {
         XCTAssertEqual(manifest.actions.first?.parameters["source"], .string("dashboard"))
     }
 
+    @MainActor
     func testSessionUndoRestoresStateAndRecords() async throws {
         let store = try PocketStore(inMemory: true)
         let template = try XCTUnwrap(
