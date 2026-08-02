@@ -168,6 +168,33 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Record staging verification result
+        if: always() && github.ref_name == 'pocketkernel-1.0-full-rebuild'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          RESULT_PATH='.github/STAGING_RUN_RESULT.md'
+          cat > /tmp/staging-result.md <<EOF
+          # PocketKernel staging verification
+
+          - Status: ${JOB_STATUS}
+          - Tested commit: ${GITHUB_SHA}
+          - Workflow run: ${GITHUB_RUN_ID}
+          - Run number: ${GITHUB_RUN_NUMBER}
+          - Run URL: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          EOF
+          CONTENT="$(base64 < /tmp/staging-result.md | tr -d '\n')"
+          API_PATH="repos/${GITHUB_REPOSITORY}/contents/${RESULT_PATH}"
+          EXISTING_SHA="$(gh api "${API_PATH}?ref=pocketkernel-1.0-full-rebuild" --jq '.sha' 2>/dev/null || true)"
+          ARGS=(--method PUT "${API_PATH}" -f message="Record staging run ${GITHUB_RUN_NUMBER}" -f content="${CONTENT}" -f branch='pocketkernel-1.0-full-rebuild')
+          if [ -n "${EXISTING_SHA}" ]; then
+            ARGS+=(-f sha="${EXISTING_SHA}")
+          fi
+          gh api "${ARGS[@]}" >/dev/null
+
       - name: Publish GitHub release
         if: success() && inputs.publish_release
         shell: bash
