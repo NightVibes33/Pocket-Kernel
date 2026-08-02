@@ -131,7 +131,7 @@ enum ComponentKind: String, Codable, Sendable, CaseIterable {
     case textField, secureField, multilineText, numberField, toggle, slider, stepper, datePicker, picker, segmentedPicker
     case list, grid, recordForm, detail, searchResults, chart, emptyState
     case button, menu, shareButton, fileImportButton, fileExportButton, photoPickerButton, confirmationButton
-    case section, verticalStack, horizontalStack, lazyGrid, card, group, scrollContainer
+    case screen, section, verticalStack, horizontalStack, lazyGrid, card, group, scrollContainer
 }
 
 enum ChartStyle: String, Codable, Sendable, CaseIterable { case bar, line, area }
