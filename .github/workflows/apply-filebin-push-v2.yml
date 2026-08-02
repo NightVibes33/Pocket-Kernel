@@ -1,0 +1,91 @@
+name: Apply Verified PocketKernel FVP Push V2
+
+on:
+  push:
+    branches: [pocketkernel-1.0-full-rebuild]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+
+      - name: Download and verify corrected source
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://filebin.net/pocketkernel-fvp-4a027d8a/pocketkernel-fvp-batch.tar.gz'
+          ARCHIVE='/tmp/pocketkernel-fvp-batch.tar.gz'
+          curl --fail --location --retry 3 --retry-all-errors "$URL" --output "$ARCHIVE"
+          echo '4a027d8a0514f4947bdc8b4b9f03a9ac4ff729e13a1dc0cb8502e90b00f3bd49  /tmp/pocketkernel-fvp-batch.tar.gz' | sha256sum --check --strict
+          tar -tzf "$ARCHIVE" >/dev/null
+          tar -xzf "$ARCHIVE" -C .
+
+      - name: Remove staging transport and probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf \
+            .bootstrap \
+            .staging-tree-test \
+            .github/fvp-payload \
+            .github/APPLY_WORKFLOW_FALLBACK_NOTE.md \
+            .github/ATOMIC_TREE_PROBE.md \
+            .github/ATOMIC_TREE_PROBE_2.md \
+            .github/ATOMIC_TREE_PROBE_3.md \
+            .github/ATOMIC_TREE_PROBE_4.md \
+            .github/ATOMIC_TREE_PROBE_5.md \
+            .github/ATOMIC_TREE_PROBE_6.md \
+            .github/ATOMIC_TREE_PROBE_7.md \
+            .github/RELEASE_ASSET_PROBE.md \
+            .github/STAGING_FVP_BATCH_PLAN.md \
+            .github/STAGING_FVP_VERIFICATION.md \
+            .github/verification \
+            .github/workflows/apply-full-fvp-batch.yml \
+            .github/workflows/export-staging-source.yml \
+            .github/workflows/apply-filebin-fvp.yml \
+            .github/workflows/apply-filebin-push.yml \
+            .github/workflows/apply-filebin-push-v2.yml \
+            .github/workflows/report-staging-verification.yml
+
+      - name: Validate corrected source payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x Scripts/*.sh Scripts/*.py
+          Scripts/scan_source.sh
+          Scripts/validate_templates.py PocketKernel/Templates
+          git diff --check
+          test "$(grep -RIl 'canUndoDestructiveAction' PocketKernel/App/AppEnvironment.swift | wc -l | tr -d ' ')" = 1
+          test "$(find PocketKernel/Templates -name '*.pocketapp' -type f | wc -l | tr -d ' ')" = 5
+
+      - name: Commit corrected FVP tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Complete generic PocketKernel 1.0 FVP source and tests'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
+
+      - name: Dispatch Xcode 26.5 verification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sleep 3
+          gh workflow run build-unsigned.yml \
+            --repo NightVibes33/Pocket-Kernel \
+            --ref pocketkernel-1.0-full-rebuild \
+            -f publish_release=true
