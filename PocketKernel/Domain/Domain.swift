@@ -8,18 +8,16 @@ enum PocketLimits {
     static let recordsPerCollection = 5_000
     static let nestingDepth = 8
     static let packageBytes = 25 * 1_024 * 1_024
+    static let assetBytes = 10 * 1_024 * 1_024
     static let expressionCharacters = 2_000
+    static let expressionDepth = 20
     static let expressionOperations = 5_000
+    static let expressionArrayValues = 5_000
 }
 
 enum PocketValue: Codable, Sendable, Equatable {
-    case null
-    case bool(Bool)
-    case number(Double)
-    case string(String)
-    case date(Date)
-    case array([PocketValue])
-    case object([String: PocketValue])
+    case null, bool(Bool), number(Double), string(String), date(Date)
+    case array([PocketValue]), object([String: PocketValue])
 
     private enum Kind: String, Codable { case null, bool, number, string, date, array, object }
     private enum CodingKeys: String, CodingKey { case kind, value }
@@ -49,11 +47,27 @@ enum PocketValue: Codable, Sendable, Equatable {
         case .object(let value): try box.encode(Kind.object, forKey: .kind); try box.encode(value, forKey: .value)
         }
     }
+
+    var displayString: String {
+        switch self {
+        case .null: ""
+        case .bool(let value): value ? "Yes" : "No"
+        case .number(let value): value.formatted()
+        case .string(let value): value
+        case .date(let value): value.formatted(date: .abbreviated, time: .shortened)
+        case .array(let value): "\(value.count) items"
+        case .object(let value): "\(value.count) fields"
+        }
+    }
 }
 
 enum PocketCapability: String, Codable, Sendable, CaseIterable {
     case clipboardRead, clipboardWrite, fileImport, fileExport, photoSelection, camera
     case localNotifications, network, onDeviceModel
+}
+
+enum FieldKind: String, Codable, Sendable, CaseIterable {
+    case text, multilineText, number, boolean, date, choice, image
 }
 
 enum ComponentKind: String, Codable, Sendable, CaseIterable {
@@ -74,9 +88,13 @@ struct ComponentSpec: Codable, Sendable, Identifiable, Equatable {
     var actionID: String?
     var children: [ComponentSpec] = []
     var options: [String] = []
-    var minimum: Double? = nil
-    var maximum: Double? = nil
-    var visibilityExpression: String? = nil
+    var minimum: Double?
+    var maximum: Double?
+    var visibilityExpression: String?
+    var disabledExpression: String?
+    var valueField: String?
+    var labelField: String?
+    var assetID: String?
 }
 
 struct ScreenSpec: Codable, Sendable, Identifiable, Equatable {
@@ -99,15 +117,19 @@ struct ActionSpec: Codable, Sendable, Identifiable, Equatable {
     var target: String?
     var value: PocketValue?
     var requiredCapability: PocketCapability?
-    var condition: String? = nil
-    var reason: String? = nil
+    var condition: String?
+    var reason: String?
     var parameters: [String: PocketValue] = [:]
+    var nextActionIDs: [String] = []
 }
 
 struct FieldSpec: Codable, Sendable, Identifiable, Equatable {
     var id: String
     var title: String
-    var defaultValue: PocketValue
+    var kind: FieldKind = .text
+    var defaultValue: PocketValue = .string("")
+    var required: Bool = false
+    var options: [String] = []
 }
 
 struct CollectionSpec: Codable, Sendable, Identifiable, Equatable {
@@ -138,22 +160,22 @@ struct ActivityEvent: Codable, Sendable, Identifiable, Equatable {
 }
 
 struct PocketTheme: Codable, Sendable, Equatable {
-    var accentHex: String = "#6C5CE7"
-    var prefersDark: Bool = false
+    var accentHex = "#6C5CE7"
+    var prefersDark = false
 }
 
 struct PocketIcon: Codable, Sendable, Equatable {
-    var symbol: String = "square.grid.2x2.fill"
-    var backgroundHex: String = "#6C5CE7"
+    var symbol = "square.grid.2x2.fill"
+    var backgroundHex = "#6C5CE7"
 }
 
 struct MicroAppManifest: Codable, Sendable, Identifiable, Equatable {
-    var formatVersion: Int = 1
+    var formatVersion = 1
     var id: UUID
     var name: String
     var summary: String
-    var icon: PocketIcon = .init()
-    var theme: PocketTheme = .init()
+    var icon = PocketIcon()
+    var theme = PocketTheme()
     var entryScreenID: String
     var screens: [ScreenSpec]
     var actions: [ActionSpec]
@@ -172,13 +194,29 @@ struct PackageAsset: Codable, Sendable, Equatable, Identifiable {
 }
 
 struct PackageIntegrity: Codable, Sendable, Equatable {
-    var algorithm: String = "sha256"
+    var algorithm = "sha256"
     var manifestHash: String
 }
 
 struct PocketPackage: Codable, Sendable, Equatable {
-    var formatVersion: Int = 1
+    var formatVersion = 1
     var manifest: MicroAppManifest
     var assets: [PackageAsset]
     var integrity: PackageIntegrity
+}
+
+struct InstalledAppInfo: Sendable, Identifiable, Equatable {
+    var id: UUID { manifest.id }
+    var manifest: MicroAppManifest
+    var favorite: Bool
+    var disabled: Bool
+    var createdAt: Date
+    var updatedAt: Date
+    var lastOpenedAt: Date?
+}
+
+struct StoredAsset: Sendable, Equatable {
+    var id: String
+    var mediaType: String
+    var data: Data
 }
