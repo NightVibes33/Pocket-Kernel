@@ -187,7 +187,7 @@ struct ActionSpec: Codable, Sendable, Identifiable, Equatable {
 }
 
 enum FieldKind: String, Codable, Sendable, CaseIterable {
-    case text, secureText, multilineText, number, boolean, date, choice, image, file
+    case text, multilineText, number, boolean, date, choice, image
 }
 
 struct FieldSpec: Codable, Sendable, Identifiable, Equatable {
