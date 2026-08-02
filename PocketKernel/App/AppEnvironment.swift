@@ -53,34 +53,60 @@ enum ModelAvailabilityState: Sendable, Equatable {
     private var didApplyLaunchImport = false
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments) {
-        launchArguments = arguments
         if arguments.contains("-PKResetOnboarding") {
             UserDefaults.standard.set(false, forKey: "PKOnboardingComplete")
         }
+
         let storageLayout = AppEnvironment.makeLayout()
-        lifecycle = AppLifecycleController(layout: storageLayout, arguments: arguments)
-        do { store = try PocketStore(inMemory: arguments.contains("-PKInMemoryStore")) }
-        catch { startupError = error.localizedDescription; store = nil }
+        let initialLifecycle = AppLifecycleController(layout: storageLayout, arguments: arguments)
 
-        do { builtInTemplates = try TemplatePackageLibrary().load() }
-        catch { startupError = "Built-in Pocket Apps could not be loaded: \(error.localizedDescription)" }
+        var initialStore: PocketStore?
+        var initialStartupError: String?
+        do {
+            initialStore = try PocketStore(inMemory: arguments.contains("-PKInMemoryStore"))
+        } catch {
+            initialStore = nil
+            initialStartupError = error.localizedDescription
+        }
 
+        var initialTemplates: [BundledTemplate] = []
+        do {
+            initialTemplates = try TemplatePackageLibrary().load()
+        } catch where initialStartupError == nil {
+            initialStartupError = "Built-in Pocket Apps could not be loaded: \(error.localizedDescription)"
+        } catch {}
+
+        let initialGenerator: any BlueprintGenerating
+        let initialIntelligence: any IntelligenceServicing
+        let initialModelState: ModelAvailabilityState
         switch AppEnvironment.argumentValue("-PKModelMode", arguments: arguments) {
         case "mock":
-            generator = MockBlueprintGenerator()
-            intelligence = MockIntelligenceService()
-            modelState = .mock
+            initialGenerator = MockBlueprintGenerator()
+            initialIntelligence = MockIntelligenceService()
+            initialModelState = .mock
         case "template":
-            generator = TemplateBlueprintGenerator()
-            intelligence = MockIntelligenceService()
-            modelState = .templates
+            initialGenerator = TemplateBlueprintGenerator()
+            initialIntelligence = MockIntelligenceService()
+            initialModelState = .templates
         default:
-            generator = FoundationModelBlueprintGenerator()
-            intelligence = FoundationModelsService()
+            initialGenerator = FoundationModelBlueprintGenerator()
+            initialIntelligence = FoundationModelsService()
             let availability = SystemLanguageModel.default.availability
-            if case .available = availability { modelState = .available }
-            else { modelState = .unavailable(String(describing: availability)) }
+            if case .available = availability {
+                initialModelState = .available
+            } else {
+                initialModelState = .unavailable(String(describing: availability))
+            }
         }
+
+        launchArguments = arguments
+        lifecycle = initialLifecycle
+        store = initialStore
+        builtInTemplates = initialTemplates
+        startupError = initialStartupError
+        generator = initialGenerator
+        intelligence = initialIntelligence
+        modelState = initialModelState
     }
 
     func load() async {
