@@ -193,8 +193,8 @@ enum FieldKind: String, Codable, Sendable, CaseIterable {
 struct FieldSpec: Codable, Sendable, Identifiable, Equatable {
     var id: String
     var title: String
-    var defaultValue: PocketValue
     var kind: FieldKind = .text
+    var defaultValue: PocketValue
     var options: [String] = []
     var required: Bool = false
 }
@@ -288,9 +288,9 @@ struct InstalledAppInfo: Codable, Sendable, Identifiable, Equatable {
     var manifest: MicroAppManifest
     var favorite: Bool
     var disabled: Bool
-    var lastOpenedAt: Date?
     var createdAt: Date
     var updatedAt: Date
+    var lastOpenedAt: Date?
 }
 
 struct StoredAsset: Sendable, Equatable {
