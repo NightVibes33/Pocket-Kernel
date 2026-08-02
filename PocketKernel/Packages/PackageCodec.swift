@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import SwiftUI
 import UniformTypeIdentifiers
 
 extension UTType {
@@ -8,6 +9,7 @@ extension UTType {
 
 enum PackageError: LocalizedError, Equatable {
     case oversized, malformed, invalidHash, invalidAsset(String), invalidManifest([ValidationIssue])
+
     var errorDescription: String? {
         switch self {
         case .oversized: "Package exceeds the 25 MB limit."
@@ -21,23 +23,31 @@ enum PackageError: LocalizedError, Equatable {
 
 struct PackageCodec: Sendable {
     func makePackage(manifest: MicroAppManifest, assets: [PackageAsset] = []) throws -> PocketPackage {
-        let hash = sha256(try makeEncoder().encode(manifest))
-        return PocketPackage(manifest: manifest, assets: assets, integrity: .init(manifestHash: hash))
+        PocketPackage(manifest: manifest, assets: assets, integrity: try integrity(for: manifest))
     }
 
-    func encode(_ package: PocketPackage) throws -> Data { try makeEncoder().encode(package) }
+    func integrity(for manifest: MicroAppManifest) throws -> PackageIntegrity {
+        .init(manifestHash: sha256(try makeEncoder().encode(manifest)))
+    }
+
+    func encode(_ package: PocketPackage) throws -> Data {
+        let data = try makeEncoder().encode(package)
+        guard data.count <= PocketLimits.packageBytes else { throw PackageError.oversized }
+        return data
+    }
 
     func decode(_ data: Data) throws -> PocketPackage {
         guard data.count <= PocketLimits.packageBytes else { throw PackageError.oversized }
         let package: PocketPackage
-        do { package = try makeDecoder().decode(PocketPackage.self, from: data) } catch { throw PackageError.malformed }
+        do { package = try makeDecoder().decode(PocketPackage.self, from: data) }
+        catch { throw PackageError.malformed }
         guard package.formatVersion == 1, package.integrity.algorithm == "sha256" else { throw PackageError.malformed }
         guard sha256(try makeEncoder().encode(package.manifest)) == package.integrity.manifestHash.lowercased() else { throw PackageError.invalidHash }
         var decodedTotal = 0
         var assetIDs = Set<String>()
         for asset in package.assets {
-            guard assetIDs.insert(asset.id).inserted, !asset.id.contains(".."), !asset.id.contains("/") else { throw PackageError.invalidAsset(asset.id) }
-            guard let decoded = Data(base64Encoded: asset.base64Data) else { throw PackageError.invalidAsset(asset.id) }
+            guard assetIDs.insert(asset.id).inserted, !asset.id.isEmpty, !asset.id.contains(".."), !asset.id.contains("/"), !asset.id.contains("\\") else { throw PackageError.invalidAsset(asset.id) }
+            guard let decoded = Data(base64Encoded: asset.base64Data), decoded.count <= PocketLimits.assetBytes else { throw PackageError.invalidAsset(asset.id) }
             decodedTotal += decoded.count
             guard decodedTotal <= PocketLimits.packageBytes, sha256(decoded) == asset.sha256.lowercased() else { throw PackageError.invalidAsset(asset.id) }
         }
@@ -46,7 +56,31 @@ struct PackageCodec: Sendable {
         return package
     }
 
-    private func sha256(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
-    private func makeEncoder() -> JSONEncoder { let value = JSONEncoder(); value.outputFormatting = [.sortedKeys]; return value }
+    private func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func makeEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }
+
     private func makeDecoder() -> JSONDecoder { JSONDecoder() }
+}
+
+struct PocketAppDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.pocketApp] }
+    var data: Data
+
+    init(data: Data = Data()) { self.data = data }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else { throw PackageError.malformed }
+        self.data = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
 }
