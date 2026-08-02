@@ -1,34 +1,56 @@
 import Foundation
 import Observation
 
-@MainActor @Observable
-final class AppLifecycleController {
-    private struct Marker: Codable { var appID: UUID?; var openedAt: Date }
-    private let markerURL: URL?
-    var recoveryRequired = false
-    var affectedAppID: UUID?
+private struct RuntimeSessionMarker: Codable, Sendable {
+    var appID: UUID
+    var openedAt: Date
+    var lastEvent: String
+}
 
-    init() {
-        let root = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            .appending(path: "PocketKernel/Recovery", directoryHint: .isDirectory)
-        if let root { try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) }
-        markerURL = root?.appending(path: "runtime-session-open.json")
-        let arguments = ProcessInfo.processInfo.arguments
-        let shouldReadRecoveryMarker = !arguments.contains("-PKUITesting") || arguments.contains("-PKRecoveryFixture")
-        if shouldReadRecoveryMarker, let markerURL, let data = try? Data(contentsOf: markerURL), let marker = try? JSONDecoder().decode(Marker.self, from: data) {
-            recoveryRequired = true; affectedAppID = marker.appID
+@MainActor @Observable final class AppLifecycleController {
+    private let markerURL: URL
+    private(set) var recoveryRequired = false
+    private(set) var affectedAppID: UUID?
+    private(set) var lastRuntimeEvent = "The previous runtime session did not close normally."
+
+    init(layout: PocketStorageLayout, arguments: [String] = ProcessInfo.processInfo.arguments) {
+        markerURL = layout.recovery.appending(path: "runtime-session-open.json")
+        if arguments.contains("-PKRecoveryFixture") {
+            recoveryRequired = true
+            affectedAppID = nil
+            lastRuntimeEvent = "Recovery fixture requested by UI tests."
+        } else if let data = try? Data(contentsOf: markerURL), let marker = try? JSONDecoder().decode(RuntimeSessionMarker.self, from: data) {
+            recoveryRequired = true
+            affectedAppID = marker.appID
+            lastRuntimeEvent = marker.lastEvent
         }
-        if arguments.contains("-PKRecoveryFixture") { recoveryRequired = true }
-        writeMarker(appID: nil)
     }
 
-    func markRuntimeOpen(appID: UUID) { writeMarker(appID: appID) }
-    func cleanBackgroundTransition() { if let markerURL { try? FileManager.default.removeItem(at: markerURL) } }
-    func resumeSession() { recoveryRequired = false; writeMarker(appID: affectedAppID) }
-    func dismissRecovery() { recoveryRequired = false; affectedAppID = nil; writeMarker(appID: nil) }
+    func markRuntimeOpen(appID: UUID, event: String = "Opened a Pocket App runtime.") {
+        affectedAppID = appID
+        let marker = RuntimeSessionMarker(appID: appID, openedAt: Date(), lastEvent: event)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        if let data = try? encoder.encode(marker) { try? data.write(to: markerURL, options: [.atomic]) }
+    }
 
-    private func writeMarker(appID: UUID?) {
-        guard let markerURL, let data = try? JSONEncoder().encode(Marker(appID: appID, openedAt: Date())) else { return }
-        try? data.write(to: markerURL, options: .atomic)
+    func updateRuntimeEvent(_ event: String) {
+        guard let affectedAppID else { return }
+        markRuntimeOpen(appID: affectedAppID, event: event)
+    }
+
+    func markRuntimeClosed() {
+        try? FileManager.default.removeItem(at: markerURL)
+        affectedAppID = nil
+    }
+
+    func dismissRecovery() {
+        recoveryRequired = false
+        markRuntimeClosed()
+    }
+
+    func resumeSession() {
+        recoveryRequired = false
+        try? FileManager.default.removeItem(at: markerURL)
     }
 }
