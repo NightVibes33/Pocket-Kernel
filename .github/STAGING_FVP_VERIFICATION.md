@@ -6,4 +6,6 @@ Current verification includes the Swift 6-safe static SQLite bootstrap with WAL 
 
 The XCTest suite evaluates actor calls before entering synchronous assertion autoclosures, allowing Swift 6 concurrency checking to proceed into real unit and UI execution.
 
-The shipped built-in apps are now real validated `.pocketapp` resources with screens, collections, actions, capability declarations, and matching integrity hashes. This user-authored marker commit triggers the guarded SQLite testability and persistence-test patches.
+The shipped built-in apps are now real validated `.pocketapp` resources with screens, collections, actions, capability declarations, and matching integrity hashes.
+
+Run 137 isolated four Swift compiler ambiguities in the runtime renderer and permission dialog. This marker triggers their atomic, self-cleaning patch.
