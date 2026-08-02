@@ -85,7 +85,20 @@ jobs:
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           xcrun simctl shutdown all || true
           xcrun simctl boot "$UDID" || true
-          xcrun simctl bootstatus "$UDID" -b
+          READY=false
+          for attempt in $(seq 1 120); do
+            STATE="$(xcrun simctl list devices -j | /usr/bin/python3 -c 'import json,sys; data=json.load(sys.stdin)["devices"]; target=sys.argv[1]; print(next((d["state"] for devices in data.values() for d in devices if d["udid"] == target), "Missing"))' "$UDID")"
+            if [ "$STATE" = "Booted" ]; then
+              READY=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$READY" != "true" ]; then
+            echo "Simulator $UDID did not reach Booted state within four minutes."
+            xcrun simctl list devices
+            exit 1
+          fi
 
       - name: Run unit and UI tests with deterministic model
         shell: bash
