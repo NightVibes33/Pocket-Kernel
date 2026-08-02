@@ -32,7 +32,7 @@ enum StoreError: LocalizedError, Equatable {
         switch self {
         case .open: "PocketKernel could not open its local database."
         case .query(let message): "Database operation failed: \(message)"
-        case .limit: "This collection already contains 5,000 records."
+        case .limit: "This collection already contains the maximum number of records."
         case .invalidData: "The stored package data is invalid."
         case .missingApp: "The requested Pocket App does not exist."
         case .noPreviousVersion: "No previous valid version is available."
@@ -48,12 +48,14 @@ private final class SQLiteHandle: @unchecked Sendable {
 actor PocketStore {
     private let handle: SQLiteHandle
     private let layout: PocketStorageLayout
+    private let recordLimit: Int
     private var database: OpaquePointer? { handle.pointer }
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(inMemory: Bool = false) throws {
+    init(inMemory: Bool = false, recordLimit: Int = PocketLimits.recordsPerCollection) throws {
         layout = try PocketStorageLayout.make()
+        self.recordLimit = min(max(recordLimit, 1), PocketLimits.recordsPerCollection)
         let handle = SQLiteHandle()
         self.handle = handle
         let path = inMemory ? ":memory:" : layout.root.appending(path: "pocketkernel.sqlite").path
@@ -208,7 +210,7 @@ actor PocketStore {
         bind(appID.uuidString, count, 1)
         bind(record.collectionID, count, 2)
         bind(record.id.uuidString, count, 3)
-        guard sqlite3_step(count) == SQLITE_ROW, sqlite3_column_int(count, 0) < PocketLimits.recordsPerCollection else { throw StoreError.limit }
+        guard sqlite3_step(count) == SQLITE_ROW, sqlite3_column_int(count, 0) < recordLimit else { throw StoreError.limit }
         let data = try encoder.encode(record)
         try execute("INSERT OR REPLACE INTO records(app_id,collection_id,record_id,payload,created_at,updated_at) VALUES(?,?,?,?,?,?)", bindings: [
             .text(appID.uuidString), .text(record.collectionID), .text(record.id.uuidString), .data(data),
@@ -301,6 +303,40 @@ actor PocketStore {
             }
         }
     }
+
+    #if DEBUG
+    func databaseUserVersionForTesting() throws -> Int {
+        var statement: OpaquePointer?
+        try prepare("PRAGMA user_version", into: &statement)
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw StoreError.query(lastError) }
+        return Int(sqlite3_column_int(statement, 0))
+    }
+
+    func insertCorruptRecordForTesting(appID: UUID, collectionID: String) throws {
+        try execute(
+            "INSERT OR REPLACE INTO records(app_id,collection_id,record_id,payload,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+            bindings: [
+                .text(appID.uuidString),
+                .text(collectionID),
+                .text(UUID().uuidString),
+                .data(Data([0xFF, 0x00, 0xFE])),
+                .double(Date().timeIntervalSince1970),
+                .double(Date().timeIntervalSince1970)
+            ]
+        )
+    }
+
+    func insertRuntimeValueThenRollbackForTesting(appID: UUID, key: String) throws {
+        try transaction {
+            try execute(
+                "INSERT OR REPLACE INTO runtime_values(app_id,key,value) VALUES(?,?,?)",
+                bindings: [.text(appID.uuidString), .text(key), .data(try encoder.encode(PocketValue.string("rollback")))]
+            )
+            throw StoreError.invalidData
+        }
+    }
+    #endif
 
     private func package(id: UUID) throws -> PocketPackage {
         var statement: OpaquePointer?
