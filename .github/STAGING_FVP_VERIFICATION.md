@@ -10,4 +10,4 @@ The shipped built-in apps are real validated `.pocketapp` resources with screens
 
 The generated blueprint preserves typed component trees, field options/defaults, action conditions/parameters/chaining, and exact network domains instead of forcing every request into a preset tracker layout.
 
-The superseded compiler helper is gone. The one-shot runtime undo, UI, and verification-test patch has been explicitly retriggered against the current branch head.
+Run the verified V2 runtime undo patch against this exact head.
