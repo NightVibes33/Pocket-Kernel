@@ -405,6 +405,46 @@ final class RuntimeTests: XCTestCase {
         XCTAssertEqual(remaining.count, 1)
     }
 
+    func testSessionUndoRestoresStateAndRecords() async throws {
+        let store = try PocketStore(inMemory: true)
+        var package = try bundledPackage(named: "Inventory List")
+        try await store.install(package)
+        package.manifest.actions += [
+            .init(id: "set-filter", kind: .setValue, target: "state.filter", value: .string("active")),
+            .init(id: "delete-item-for-undo", kind: .deleteRecord, target: "items")
+        ]
+        let executor = ActionExecutor(store: store, intelligence: MockIntelligenceService())
+
+        _ = try await executor.execute("set-filter", manifest: package.manifest, context: [:])
+        let activeFilter = try await store.runtimeValue(appID: package.manifest.id, key: "filter")
+        XCTAssertEqual(activeFilter, .string("active"))
+        let canUndoState = await executor.canUndo()
+        XCTAssertTrue(canUndoState)
+
+        _ = try await executor.undoLast()
+        let clearedFilter = try await store.runtimeValue(appID: package.manifest.id, key: "filter")
+        XCTAssertNil(clearedFilter)
+
+        let create = try XCTUnwrap(package.manifest.actions.first { $0.kind == .createRecord })
+        guard case .record(let record) = try await executor.execute(
+            create.id,
+            manifest: package.manifest,
+            context: ["form": .object(["name": .string("Undo Item"), "quantity": .number(1)])]
+        ) else { return XCTFail("Expected created record") }
+
+        _ = try await executor.execute(
+            "delete-item-for-undo",
+            manifest: package.manifest,
+            context: ["selectedRecordID": .string(record.id.uuidString)]
+        )
+        let deletedRecords = try await store.records(appID: package.manifest.id, collectionID: "items")
+        XCTAssertTrue(deletedRecords.isEmpty)
+
+        _ = try await executor.undoLast()
+        let restoredRecords = try await store.records(appID: package.manifest.id, collectionID: "items")
+        XCTAssertEqual(restoredRecords, [record])
+    }
+
     func testPhotoConditionsCyclesCancellationAndNetworkBoundaries() async throws {
         let store = try PocketStore(inMemory: true)
         var manifest = try bundledPackage(named: "Quick Journal").manifest

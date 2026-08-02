@@ -382,8 +382,8 @@ actor ActionExecutor {
 
     private func compare(_ lhs: PocketValue, _ rhs: PocketValue) -> Int {
         switch (lhs, rhs) {
-        case (.number(let left), .number(let right)): left == right ? 0 : left < right ? -1 : 1
-        case (.date(let left), .date(let right)): left == right ? 0 : left < right ? -1 : 1
+        case (.number(let left), .number(let right)): return left == right ? 0 : left < right ? -1 : 1
+        case (.date(let left), .date(let right)): return left == right ? 0 : left < right ? -1 : 1
         default:
             let left = lhs.displayString.localizedLowercase
             let right = rhs.displayString.localizedLowercase
