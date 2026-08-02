@@ -8,6 +8,6 @@ The XCTest suite evaluates actor calls before entering synchronous assertion aut
 
 The shipped built-in apps are real validated `.pocketapp` resources with screens, collections, actions, capability declarations, and matching integrity hashes.
 
-The generated blueprint now preserves typed component trees, field options/defaults, action conditions/parameters/chaining, and exact network domains instead of forcing every request into a preset tracker layout.
+The generated blueprint preserves typed component trees, field options/defaults, action conditions/parameters/chaining, and exact network domains instead of forcing every request into a preset tracker layout.
 
-Trigger the atomic runtime undo, UI, and verification-test patch.
+The superseded compiler helper is gone. Trigger the runtime undo, UI, and verification-test patch now.
