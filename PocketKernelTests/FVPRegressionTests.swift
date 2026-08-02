@@ -1,6 +1,18 @@
 import XCTest
 @testable import PocketKernel
 
+extension Array where Element == ScreenSpec {
+    func flatMap(_ keyPath: KeyPath<ScreenSpec, [ComponentSpec]>) -> [ComponentSpec] {
+        func flatten(_ components: [ComponentSpec]) -> [ComponentSpec] {
+            components + components.flatMap { flatten($0.children) }
+        }
+
+        return reduce(into: []) { result, screen in
+            result += flatten(screen[keyPath: keyPath])
+        }
+    }
+}
+
 final class FVPRegressionTests: XCTestCase {
     func testGeneratedBlueprintPreservesCustomLayoutAndActionMetadata() {
         let blueprint = MicroAppBlueprint(
