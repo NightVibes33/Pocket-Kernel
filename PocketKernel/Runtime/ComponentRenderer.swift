@@ -5,8 +5,8 @@ import UIKit
 struct ComponentRenderer: View {
     let component: ComponentSpec
     let recordsByCollection: [String: [PocketRecord]]
-    let collectionSpecs: [String: CollectionSpec] = [:]
-    let assetData: [String: Data] = [:]
+    let collectionSpecs: [String: CollectionSpec]
+    let assetData: [String: Data]
     @Binding var runtimeValues: [String: PocketValue]
     var runAction: (String) -> Void
     var importFile: () -> Void
@@ -185,7 +185,7 @@ struct ComponentRenderer: View {
     @ViewBuilder private var imageView: some View {
         let stateValue = component.assetID.flatMap { runtimeValues["asset.\($0)"] } ?? runtimeValues[key]
         let storedData = component.assetID.flatMap { assetData[$0] }
-        let encodedData = string(stateValue).flatMap(Data.init(base64Encoded:))
+        let encodedData = string(stateValue).flatMap { Data(base64Encoded: $0) }
         if let data = storedData ?? encodedData, let image = UIImage(data: data) {
             Image(uiImage: image)
                 .resizable()
@@ -387,8 +387,10 @@ struct ComponentRenderer: View {
 
     private func compare(_ lhs: PocketValue, _ rhs: PocketValue) -> Int {
         switch (lhs, rhs) {
-        case (.number(let left), .number(let right)): left == right ? 0 : left < right ? -1 : 1
-        case (.date(let left), .date(let right)): left == right ? 0 : left < right ? -1 : 1
+        case (.number(let left), .number(let right)):
+            return left == right ? 0 : left < right ? -1 : 1
+        case (.date(let left), .date(let right)):
+            return left == right ? 0 : left < right ? -1 : 1
         default:
             let left = lhs.displayString.localizedLowercase
             let right = rhs.displayString.localizedLowercase
