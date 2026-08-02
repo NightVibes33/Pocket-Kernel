@@ -58,7 +58,7 @@ actor PocketStore {
         self.handle = handle
         let path = inMemory ? ":memory:" : layout.root.appending(path: "pocketkernel.sqlite").path
         guard sqlite3_open(path, &handle.pointer) == SQLITE_OK else { throw StoreError.open }
-        try migrate()
+        try Self.migrate(handle.pointer)
     }
 
     func installedApps() throws -> [InstalledAppInfo] {
@@ -311,7 +311,13 @@ actor PocketStore {
         return try PackageCodec().decode(data)
     }
 
-    private func migrate() throws {
+    private static func migrate(_ database: OpaquePointer?) throws {
+    func raw(_ sql: String) throws {
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            let message = database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite migration error"
+            throw StoreError.query(message)
+        }
+    }
         try raw("PRAGMA journal_mode=WAL")
         try raw("PRAGMA foreign_keys=ON")
         try raw("""
