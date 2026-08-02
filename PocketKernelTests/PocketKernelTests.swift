@@ -60,7 +60,12 @@ final class DomainAndValidationTests: XCTestCase {
         let manifest = BlueprintConverter().convert(first, capabilities: [])
         XCTAssertEqual(manifest.screens.count, 2)
         XCTAssertTrue(manifest.collections.flatMap(\.fields).contains { $0.kind == .number })
-        XCTAssertTrue(manifest.screens.flatMap(\.components).contains { $0.kind == .chart })
+        func containsChart(_ components: [ComponentSpec]) -> Bool {
+    components.contains { component in
+        component.kind == .chart || containsChart(component.children)
+    }
+}
+XCTAssertTrue(manifest.screens.contains { containsChart($0.components) })
         XCTAssertTrue(validationErrorCodes(manifest).isEmpty)
 
         let repaired = BlueprintRepairer().repair(.init(
