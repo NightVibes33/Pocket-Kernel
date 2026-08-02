@@ -10,4 +10,4 @@ The shipped built-in apps are real validated `.pocketapp` resources with screens
 
 The generated blueprint preserves typed component trees, field options/defaults, action conditions/parameters/chaining, and exact network domains instead of forcing every request into a preset tracker layout.
 
-The bounded runtime undo stack and RuntimeView compiler simplifications are committed. Apply the exact missing-return fix in RuntimeEngine, remove its one-time helper, and launch the clean verification run.
+The runtime undo and canonical package-integrity changes are committed. Apply the nested-component chart assertion directly, remove its one-time helper, then run the stable verification pipeline.
