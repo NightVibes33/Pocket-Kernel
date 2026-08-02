@@ -63,7 +63,7 @@ enum ModelAvailabilityState: Sendable, Equatable {
         catch { startupError = error.localizedDescription; store = nil }
 
         do { builtInTemplates = try TemplatePackageLibrary().load() }
-        catch { if startupError == nil { startupError = "Built-in Pocket Apps could not be loaded: \(error.localizedDescription)" } }
+        catch { startupError = "Built-in Pocket Apps could not be loaded: \(error.localizedDescription)" }
 
         switch AppEnvironment.argumentValue("-PKModelMode", arguments: arguments) {
         case "mock":
