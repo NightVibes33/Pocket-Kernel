@@ -85,9 +85,16 @@ enum ActionResult: Sendable, Equatable {
 }
 
 actor ActionExecutor {
+    private enum UndoOperation: Sendable {
+        case restoreRuntimeValue(appID: UUID, key: String, previous: PocketValue?)
+        case deleteCreatedRecord(appID: UUID, collectionID: String, recordID: UUID)
+        case restoreRecord(appID: UUID, record: PocketRecord)
+    }
+
     private let store: PocketStore
     private let broker: PermissionBroker
     private let intelligence: any IntelligenceServicing
+    private var undoStack: [UndoOperation] = []
 
     init(
         store: PocketStore,
@@ -108,6 +115,28 @@ actor ActionExecutor {
 
     func decide(_ decision: PermissionDecision, request: PermissionRequest) async throws {
         try await broker.decide(decision, request: request)
+    }
+
+    func canUndo() -> Bool { !undoStack.isEmpty }
+
+    func undoLast() async throws -> ActionResult {
+        guard let operation = undoStack.popLast() else { return .none }
+        switch operation {
+        case .restoreRuntimeValue(let appID, let key, let previous):
+            try await store.setRuntimeValue(previous, appID: appID, key: key)
+            return .value(previous ?? .null)
+        case .deleteCreatedRecord(let appID, let collectionID, let recordID):
+            try await store.deleteRecord(appID: appID, collectionID: collectionID, recordID: recordID)
+            return .none
+        case .restoreRecord(let appID, let record):
+            try await store.save(record: record, appID: appID)
+            return .record(record)
+        }
+    }
+
+    private func registerUndo(_ operation: UndoOperation) {
+        undoStack.append(operation)
+        if undoStack.count > 100 { undoStack.removeFirst(undoStack.count - 100) }
     }
 
     private func execute(
@@ -163,13 +192,19 @@ actor ActionExecutor {
         switch action.kind {
         case .setValue:
             guard let key = action.target else { throw RuntimeExecutionError.invalidParameter("target") }
+            let normalizedKey = normalizedStateKey(key)
+            let previous = try await store.runtimeValue(appID: manifest.id, key: normalizedKey)
             let value = action.value ?? .null
-            try await store.setRuntimeValue(value, appID: manifest.id, key: normalizedStateKey(key))
+            try await store.setRuntimeValue(value, appID: manifest.id, key: normalizedKey)
+            registerUndo(.restoreRuntimeValue(appID: manifest.id, key: normalizedKey, previous: previous))
             return .value(value)
 
         case .clearValue:
             guard let key = action.target else { throw RuntimeExecutionError.invalidParameter("target") }
-            try await store.setRuntimeValue(nil, appID: manifest.id, key: normalizedStateKey(key))
+            let normalizedKey = normalizedStateKey(key)
+            let previous = try await store.runtimeValue(appID: manifest.id, key: normalizedKey)
+            try await store.setRuntimeValue(nil, appID: manifest.id, key: normalizedKey)
+            registerUndo(.restoreRuntimeValue(appID: manifest.id, key: normalizedKey, previous: previous))
             return .none
 
         case .createRecord:
@@ -190,6 +225,7 @@ actor ActionExecutor {
                 updatedAt: now
             )
             try await store.save(record: record, appID: manifest.id)
+            registerUndo(.deleteCreatedRecord(appID: manifest.id, collectionID: collectionID, recordID: record.id))
             return .record(record)
 
         case .updateRecord:
@@ -199,18 +235,24 @@ actor ActionExecutor {
             guard var record = try await store.records(appID: manifest.id, collectionID: collectionID)
                 .first(where: { $0.id == id })
             else { throw RuntimeExecutionError.invalidParameter("recordID") }
+            let previous = record
             let form = object(context["form"]) ?? [:]
             for (key, value) in action.parameters where key != "recordID" { record.values[key] = value }
             for (key, value) in form { record.values[key] = value }
             record.updatedAt = Date()
             try await store.save(record: record, appID: manifest.id)
+            registerUndo(.restoreRecord(appID: manifest.id, record: previous))
             return .record(record)
 
         case .deleteRecord:
             guard let collectionID = action.target,
                   let id = recordID(action: action, context: context)
             else { throw RuntimeExecutionError.invalidParameter("recordID") }
+            guard let previous = try await store.records(appID: manifest.id, collectionID: collectionID)
+                .first(where: { $0.id == id })
+            else { throw RuntimeExecutionError.invalidParameter("recordID") }
             try await store.deleteRecord(appID: manifest.id, collectionID: collectionID, recordID: id)
+            registerUndo(.restoreRecord(appID: manifest.id, record: previous))
             return .none
 
         case .sortRecords:

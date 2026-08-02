@@ -634,6 +634,7 @@ struct RuntimeView: View {
     @State private var actionPhotoItem: PhotosPickerItem?
     @State private var actionPhotoTarget = "selectedPhoto"
     @State private var actionPhotoRecognizeText = false
+    @State private var canUndo = false
 
     init(manifest: MicroAppManifest, previewOnly: Bool = false) {
         self.manifest = manifest
@@ -643,6 +644,10 @@ struct RuntimeView: View {
 
     private var screen: ScreenSpec? { manifest.screens.first { $0.id == selectedScreenID } ?? manifest.screens.first }
     private var collectionSpecs: [String: CollectionSpec] { Dictionary(uniqueKeysWithValues: manifest.collections.map { ($0.id, $0) }) }
+    private var permissionDialogTitle: String {
+        guard let request = permissionRequest else { return "Permission" }
+        return request.appName + " requests " + request.capability.displayName
+    }
 
     var body: some View {
         List {
@@ -669,7 +674,11 @@ struct RuntimeView: View {
         .navigationTitle(screen?.title ?? manifest.name)
         .toolbar {
             if !previewOnly {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { environment.lifecycle.markRuntimeClosed(); dismiss() } }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { undoLast() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                        .disabled(!canUndo)
+                    Button("Done") { environment.lifecycle.markRuntimeClosed(); dismiss() }
+                }
             }
         }
         .task { await startRuntime() }
@@ -693,7 +702,7 @@ struct RuntimeView: View {
             Button("Dismiss", role: .cancel) {}
         } message: { Text(runtimeError ?? "") }
         .confirmationDialog(
-            permissionRequest.map { "\($0.appName) requests \($0.capability.displayName)" } ?? "Permission",
+            permissionDialogTitle,
             isPresented: Binding(get: { permissionRequest != nil }, set: { if !$0 { permissionRequest = nil } }),
             titleVisibility: .visible
         ) { permissionButtons } message: { Text(permissionRequest?.reason ?? "") }
@@ -710,6 +719,7 @@ struct RuntimeView: View {
         guard !previewOnly, let store = environment.store else { return }
         let configured = PermissionDecision(rawValue: UserDefaults.standard.string(forKey: "PKDefaultPermission") ?? "") ?? .notRequested
         executor = ActionExecutor(store: store, intelligence: environment.intelligence, defaultPermission: configured)
+        canUndo = false
         environment.lifecycle.markRuntimeOpen(appID: manifest.id)
         await reload()
     }
@@ -757,8 +767,21 @@ struct RuntimeView: View {
                 let result = try await executor.execute(id, manifest: manifest, context: context)
                 await apply(result)
                 await reload()
+                canUndo = await executor.canUndo()
             } catch RuntimeExecutionError.permissionRequired(let request) {
                 permissionRequest = request
+            } catch { runtimeError = error.localizedDescription }
+        }
+    }
+
+    private func undoLast() {
+        guard let executor else { return }
+        Task {
+            do {
+                let result = try await executor.undoLast()
+                await apply(result)
+                await reload()
+                canUndo = await executor.canUndo()
             } catch { runtimeError = error.localizedDescription }
         }
     }
@@ -878,8 +901,9 @@ struct RuntimeView: View {
                 ForEach(field.options, id: \.self) { Text($0).tag($0) }
             }
         case .image:
+            let hasImage = formValues[field.id] != nil
             PhotosPicker(selection: formPhotoBinding(for: field.id), matching: .images) {
-                Label(formValues[field.id] == nil ? "Choose \(field.title)" : "Replace \(field.title)", systemImage: "photo.on.rectangle")
+                Label(hasImage ? "Replace \(field.title)" : "Choose \(field.title)", systemImage: "photo.on.rectangle")
             }
         }
     }
