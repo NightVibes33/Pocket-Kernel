@@ -1,0 +1,84 @@
+name: Apply Run 137 Compiler Fixes
+
+on:
+  push:
+    branches: [pocketkernel-1.0-full-rebuild]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+      - name: Apply Swift compiler fixes atomically
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          renderer = Path('PocketKernel/Runtime/ComponentRenderer.swift')
+          source = renderer.read_text()
+          replacements = {
+              '    let collectionSpecs: [String: CollectionSpec] = [:]\n': '    let collectionSpecs: [String: CollectionSpec]\n',
+              '    let assetData: [String: Data] = [:]\n': '    let assetData: [String: Data]\n',
+              '        let encodedData = string(stateValue).flatMap(Data.init(base64Encoded:))\n': '        let encodedData = string(stateValue).flatMap { Data(base64Encoded: $0) }\n',
+          }
+          for old, new in replacements.items():
+              if old not in source:
+                  raise SystemExit(f'Missing renderer expression: {old.strip()}')
+              source = source.replace(old, new, 1)
+          renderer.write_text(source)
+
+          root = Path('PocketKernel/Shell/RootTabView.swift')
+          source = root.read_text()
+          old_properties = '''    private var screen: ScreenSpec? { manifest.screens.first { $0.id == selectedScreenID } ?? manifest.screens.first }
+    private var collectionSpecs: [String: CollectionSpec] { Dictionary(uniqueKeysWithValues: manifest.collections.map { ($0.id, $0) }) }
+'''
+          new_properties = '''    private var screen: ScreenSpec? { manifest.screens.first { $0.id == selectedScreenID } ?? manifest.screens.first }
+    private var collectionSpecs: [String: CollectionSpec] { Dictionary(uniqueKeysWithValues: manifest.collections.map { ($0.id, $0) }) }
+    private var permissionDialogTitle: String {
+        guard let request = permissionRequest else { return "Permission" }
+        return "\(request.appName) requests \(request.capability.displayName)"
+    }
+    private var permissionDialogPresented: Binding<Bool> {
+        Binding(
+            get: { permissionRequest != nil },
+            set: { presented in if !presented { permissionRequest = nil } }
+        )
+    }
+'''
+          if old_properties not in source:
+              raise SystemExit('Missing RuntimeView property anchor')
+          source = source.replace(old_properties, new_properties, 1)
+
+          old_dialog = '''        .confirmationDialog(
+            permissionRequest.map { "\($0.appName) requests \($0.capability.displayName)" } ?? "Permission",
+            isPresented: Binding(get: { permissionRequest != nil }, set: { if !$0 { permissionRequest = nil } }),
+            titleVisibility: .visible
+        ) { permissionButtons } message: { Text(permissionRequest?.reason ?? "") }
+'''
+          new_dialog = '''        .confirmationDialog(
+            permissionDialogTitle,
+            isPresented: permissionDialogPresented,
+            titleVisibility: .visible
+        ) { permissionButtons } message: { Text(permissionRequest?.reason ?? "") }
+'''
+          if old_dialog not in source:
+              raise SystemExit('Missing permission dialog expression')
+          source = source.replace(old_dialog, new_dialog, 1)
+          root.write_text(source)
+          PY
+
+          rm .github/workflows/apply-run137-compiler-fixes.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PocketKernel/Runtime/ComponentRenderer.swift PocketKernel/Shell/RootTabView.swift .github/workflows/apply-run137-compiler-fixes.yml
+          git commit -m 'Fix SwiftUI compiler ambiguity from run 137'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
