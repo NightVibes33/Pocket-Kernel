@@ -1,7 +1,7 @@
 # PocketKernel staging verification
 
 - Status: cancelled
-- Tested commit: f67f508b622a4c9b38e54f02c205bc771d8ca224
-- Workflow run: 30765129948
-- Run number: 80
-- Run URL: https://github.com/NightVibes33/Pocket-Kernel/actions/runs/30765129948
+- Tested commit: 2afce700a46d810579e768c66ed69fb25784bb15
+- Workflow run: 30765172469
+- Run number: 82
+- Run URL: https://github.com/NightVibes33/Pocket-Kernel/actions/runs/30765172469
