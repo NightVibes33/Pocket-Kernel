@@ -4,6 +4,6 @@ This marker keeps the full rebuild isolated while the draft pull request runs th
 
 Current verification includes the Swift 6-safe static SQLite bootstrap with WAL and foreign keys enabled before actor-isolated access begins.
 
-The XCTest suite now evaluates actor calls before entering synchronous assertion autoclosures, allowing Swift 6 concurrency checking to proceed into real unit and UI execution.
+The XCTest suite evaluates actor calls before entering synchronous assertion autoclosures, allowing Swift 6 concurrency checking to proceed into real unit and UI execution.
 
-Temporary bootstrap archives, patch workflows, export workflows, and probe files have been removed. This separate user-authored commit invokes the staging-only dispatcher, which calls the final manual workflow on this branch.
+The shipped built-in apps are now real validated `.pocketapp` resources with screens, collections, actions, capability declarations, and matching integrity hashes. This user-authored marker commit triggers the guarded SQLite testability and persistence-test patches.
