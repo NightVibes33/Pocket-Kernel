@@ -259,13 +259,13 @@ struct ManifestValidator: Sendable {
 
     private func identifierIssues(_ values: [String], path: String) -> [ValidationIssue] {
         values.compactMap { value in
-            isIdentifier(value) ? nil : error("identifier.invalid", path, "Invalid identifier: \(value). Use lowercase letters, numbers, and hyphens.")
+            isIdentifier(value) ? nil : error("identifier.invalid", path, "Invalid identifier: \(value). Use letters, numbers, hyphens, and underscores.")
         }
     }
 
     private func isIdentifier(_ value: String) -> Bool {
         guard !value.isEmpty, value.count <= 80, value.first?.isLetter == true else { return false }
-        return value.allSatisfy { $0.isLowercase || $0.isNumber || $0 == "-" }
+        return value.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
             && !value.contains("..")
             && !value.contains("/")
             && !value.contains("\\")
