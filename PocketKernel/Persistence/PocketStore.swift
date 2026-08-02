@@ -319,6 +319,7 @@ actor PocketStore {
             }
         }
 
+        try raw("PRAGMA journal_mode=WAL")
         try raw("PRAGMA foreign_keys=ON")
         try raw("""
         CREATE TABLE IF NOT EXISTS installed_apps(
