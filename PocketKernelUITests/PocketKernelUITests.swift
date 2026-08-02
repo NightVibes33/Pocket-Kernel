@@ -21,7 +21,7 @@ import XCTest
 
         for name in ["Task Board", "Habit Tracker", "Quick Journal", "Inventory List", "Service Log"] {
             let before = pocketAppButtons(named: name, in: app).count
-            tap(pocketAppButtons(named: name, in: app).lastMatch, timeout: 10)
+            tap(lastPocketAppButton(named: name, in: app), timeout: 10)
             waitForButtonCount(named: name, minimum: before + 1, in: app, timeout: 10)
             tap(pocketAppButtons(named: name, in: app).firstMatch, timeout: 8)
             XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 8), name)
@@ -114,6 +114,11 @@ import XCTest
 
     private func pocketAppButtons(named name: String, in app: XCUIApplication) -> XCUIElementQuery {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", name))
+    }
+
+    private func lastPocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
+        let query = pocketAppButtons(named: name, in: app)
+        return query.element(boundBy: max(query.count - 1, 0))
     }
 
     private func waitForButtonCount(
