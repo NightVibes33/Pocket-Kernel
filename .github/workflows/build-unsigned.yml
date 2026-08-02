@@ -1,8 +1,8 @@
 name: Build PocketKernel Unsigned IPA
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [pocketkernel-1.0-full-rebuild]
   workflow_dispatch:
     inputs:
       publish_release:
