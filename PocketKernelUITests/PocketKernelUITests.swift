@@ -1,45 +1,78 @@
 import XCTest
 
 @MainActor final class PocketKernelUITests: XCTestCase {
-    func testOneShotMockGenerationRecordPersistenceExportAndDelete() {
-        let app = XCUIApplication(); app.launchArguments = ["-PKUITesting", "1", "-PKResetDatabase", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "create"]; app.launch()
-        tapCenter(app.buttons["Generate on device"], timeout: 10)
+    func testGenerateInstallCreatePersistAndDelete() {
+        let app = launch(startTab: "create", reset: true)
+        tap(app.buttons["Generate on Device"], timeout: 15)
+
         let install = app.buttons["Install Service Log"]
-        scrollToElement(install, in: app, timeout: 15)
-        tapCenter(install)
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: install); waitForExpectations(timeout: 10)
-        app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
-        let installedServiceLog = app.buttons["Service Log, Track maintenance and upcoming service"]
-        tapCenter(installedServiceLog, timeout: 10)
-        let addService = app.buttons["Add Service"]
-        XCTAssertTrue(addService.waitForExistence(timeout: 5)); addService.tap()
-        let mileage = app.textFields["Mileage"]
-        XCTAssertTrue(mileage.waitForExistence(timeout: 10)); mileage.tap(); mileage.typeText("42000")
-        let save = app.buttons["Save"]
-        XCTAssertTrue(save.waitForExistence(timeout: 5)); save.tap()
-        app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
-        if app.buttons["Continue Safely"].waitForExistence(timeout: 2) { tapCenter(app.buttons["Continue Safely"]) }
-        tapCenter(app.buttons["Service Log, Track maintenance and upcoming service"], timeout: 10)
-        let persistedMileage = app.descendants(matching: .any)["record-field-mileage"]
-        XCTAssertTrue(persistedMileage.waitForExistence(timeout: 5))
-        XCTAssertTrue(persistedMileage.label.contains("42000"))
+        scrollToElement(install, app: app, timeout: 20)
+        tap(install)
+        XCTAssertFalse(install.waitForExistence(timeout: 2))
+
+        app.terminate()
+        let library = launch(startTab: "library")
+        let serviceLog = library.staticTexts["Service Log"].firstMatch
+        tap(serviceLog, timeout: 10)
+
+        let addService = library.buttons["Add Service"]
+        tap(addService, timeout: 10)
+        let mileage = library.textFields["Mileage"]
+        tap(mileage, timeout: 10)
+        mileage.typeText("42000")
+        let cost = library.textFields["Cost"]
+        tap(cost, timeout: 5)
+        cost.typeText("79.99")
+        tap(library.buttons["Save"], timeout: 5)
+
+        library.terminate()
+        let relaunched = launch(startTab: "library")
+        if relaunched.buttons["Continue Safely"].waitForExistence(timeout: 2) { tap(relaunched.buttons["Continue Safely"]) }
+        tap(relaunched.staticTexts["Service Log"].firstMatch, timeout: 10)
+        let persisted = relaunched.descendants(matching: .any)["record-field-mileage"]
+        XCTAssertTrue(persisted.waitForExistence(timeout: 8))
+        XCTAssertTrue(persisted.label.contains("42000"))
+
+        tap(relaunched.buttons["Done"], timeout: 5)
+        pressAndHold(relaunched.staticTexts["Service Log"].firstMatch)
+        tap(relaunched.buttons["Delete"], timeout: 5)
+        XCTAssertFalse(relaunched.staticTexts["Service Log"].firstMatch.waitForExistence(timeout: 2))
     }
 
-    private func tapCenter(_ element: XCUIElement, timeout: TimeInterval = 5) {
-        XCTAssertTrue(element.waitForExistence(timeout: timeout))
+    func testBuiltInTemplateAndRecoveryFixture() {
+        let app = launch(startTab: "library", reset: true)
+        tap(app.buttons["Task Board"], timeout: 10)
+        XCTAssertTrue(app.staticTexts["Task Board"].firstMatch.waitForExistence(timeout: 5))
+        app.terminate()
+
+        let recovery = XCUIApplication()
+        recovery.launchArguments = ["-PKUITesting", "1", "-PKRecoveryFixture", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1"]
+        recovery.launch()
+        XCTAssertTrue(recovery.staticTexts["PocketKernel recovered an interrupted app"].waitForExistence(timeout: 8))
+        tap(recovery.buttons["Continue Safely"], timeout: 5)
+    }
+
+    private func launch(startTab: String, reset: Bool = false) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", startTab]
+        if reset { app.launchArguments += ["-PKResetDatabase", "1"] }
+        app.launch()
+        return app
+    }
+
+    private func tap(_ element: XCUIElement, timeout: TimeInterval = 5) {
+        XCTAssertTrue(element.waitForExistence(timeout: timeout), "Missing element: \(element)")
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
-    private func scrollToElement(_ element: XCUIElement, in app: XCUIApplication, timeout: TimeInterval) {
+    private func scrollToElement(_ element: XCUIElement, app: XCUIApplication, timeout: TimeInterval) {
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.exists, Date() < deadline {
-            app.swipeUp()
-        }
+        while !element.exists && Date() < deadline { app.swipeUp() }
         XCTAssertTrue(element.exists)
     }
 
-    func testRecoveryFixtureAppears() {
-        let app = XCUIApplication(); app.launchArguments = ["-PKUITesting", "1", "-PKRecoveryFixture", "1", "-PKModelMode", "mock"]; app.launch()
-        XCTAssertTrue(app.staticTexts["PocketKernel recovered from an interrupted session"].waitForExistence(timeout: 5))
+    private func pressAndHold(_ element: XCUIElement) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 1.2)
     }
 }
