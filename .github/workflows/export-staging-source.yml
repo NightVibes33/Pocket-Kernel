@@ -1,0 +1,32 @@
+name: Export PocketKernel Staging Source
+
+on:
+  push:
+    branches: [pocketkernel-1.0-full-rebuild]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Archive source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf staging-source
+          mkdir staging-source
+          rsync -a --exclude='.git' --exclude='staging-source' ./ staging-source/
+          zip -qr PocketKernel-staging-source.zip staging-source
+      - name: Upload source
+        uses: actions/upload-artifact@v7
+        with:
+          name: PocketKernel-staging-source
+          path: PocketKernel-staging-source.zip
+          if-no-files-found: error
+          retention-days: 1
