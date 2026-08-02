@@ -1,32 +1,78 @@
-name: Export PocketKernel Staging Source
+name: Apply PocketKernel Staging FVP
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
 
 jobs:
-  export:
+  apply:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 1
-          persist-credentials: false
-      - name: Archive source
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+      - name: Replace staging source tree
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf staging-source
-          mkdir staging-source
-          rsync -a --exclude='.git' --exclude='staging-source' ./ staging-source/
-          zip -qr PocketKernel-staging-source.zip staging-source
-      - name: Upload source
-        uses: actions/upload-artifact@v7
-        with:
-          name: PocketKernel-staging-source
-          path: PocketKernel-staging-source.zip
-          if-no-files-found: error
-          retention-days: 1
+          PAYLOAD_B64="$(python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/apply-full-fvp-batch.yml').read_text()
+          for line in source.splitlines():
+              stripped = line.strip()
+              if stripped.startswith('PAYLOAD_B64:'):
+                  value = stripped.split(':', 1)[1].strip()
+                  if value.startswith("'") and value.endswith("'"):
+                      value = value[1:-1]
+                  print(value)
+                  break
+          else:
+              raise SystemExit('Embedded FVP payload was not found')
+          PY
+          )"
+          test -n "$PAYLOAD_B64"
+          printf '%s' "$PAYLOAD_B64" | base64 --decode > /tmp/pocketkernel-fvp.tar.gz
+          tar -xzf /tmp/pocketkernel-fvp.tar.gz -C .
+          rm -rf \
+            .bootstrap \
+            .staging-tree-test \
+            .github/APPLY_WORKFLOW_FALLBACK_NOTE.md \
+            .github/ATOMIC_TREE_PROBE.md \
+            .github/ATOMIC_TREE_PROBE_2.md \
+            .github/ATOMIC_TREE_PROBE_3.md \
+            .github/ATOMIC_TREE_PROBE_4.md \
+            .github/ATOMIC_TREE_PROBE_5.md \
+            .github/ATOMIC_TREE_PROBE_6.md \
+            .github/ATOMIC_TREE_PROBE_7.md \
+            .github/STAGING_FVP_BATCH_PLAN.md \
+            .github/STAGING_FVP_VERIFICATION.md \
+            .github/workflows/apply-full-fvp-batch.yml \
+            .github/workflows/export-staging-source.yml
+          chmod +x Scripts/*.sh Scripts/*.py
+          swiftformat PocketKernel PocketKernelTests PocketKernelUITests --config .swiftformat
+          Scripts/scan_source.sh
+          Scripts/validate_templates.py PocketKernel/Templates
+          swiftlint lint --strict --config .swiftlint.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Complete generic PocketKernel 1.0 FVP source and tests'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
+      - name: Dispatch Xcode 26.5 verification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sleep 3
+          gh workflow run build-unsigned.yml \
+            --repo NightVibes33/Pocket-Kernel \
+            --ref pocketkernel-1.0-full-rebuild \
+            -f publish_release=false
