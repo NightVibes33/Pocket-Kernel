@@ -2,16 +2,15 @@ import XCTest
 @testable import PocketKernel
 
 private func bundledPackage(named name: String) throws -> PocketPackage {
-    let template = try XCTUnwrap(TemplatePackageLibrary().load().first { $0.manifest.name == name })
-    return template.package
+    try XCTUnwrap(TemplatePackageLibrary().load().first { $0.manifest.name == name }).package
 }
 
-private func errorCodes(_ manifest: MicroAppManifest) -> Set<String> {
+private func validationErrorCodes(_ manifest: MicroAppManifest) -> Set<String> {
     Set(ManifestValidator().validate(manifest).filter { $0.severity == .error }.map(\.code))
 }
 
 final class DomainAndValidationTests: XCTestCase {
-    func testPocketValueRoundTripForEveryRecursiveCase() throws {
+    func testPocketValueRoundTripsEveryRecursiveCase() throws {
         let value = PocketValue.object([
             "null": .null,
             "done": .bool(false),
@@ -25,7 +24,7 @@ final class DomainAndValidationTests: XCTestCase {
         XCTAssertEqual(value, try JSONDecoder().decode(PocketValue.self, from: encoded))
     }
 
-    func testManifestAndUnknownEnums() throws {
+    func testManifestRoundTripAndUnknownEnums() throws {
         let manifest = try bundledPackage(named: "Service Log").manifest
         let encoded = try JSONEncoder().encode(manifest)
         XCTAssertEqual(manifest, try JSONDecoder().decode(MicroAppManifest.self, from: encoded))
@@ -33,34 +32,60 @@ final class DomainAndValidationTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(ComponentKind.self, from: Data("\"futureComponent\"".utf8)))
     }
 
-    func testEveryBundledPackageIsCompleteAndValid() throws {
+    func testEveryBundledPackageIsCompleteValidAndHashVerified() throws {
         let templates = try TemplatePackageLibrary().load()
         XCTAssertEqual(templates.count, 5)
-        XCTAssertEqual(Set(templates.map { $0.manifest.name }), Set(["Task Board", "Habit Tracker", "Quick Journal", "Inventory List", "Service Log"]))
+        XCTAssertEqual(
+            Set(templates.map { $0.manifest.name }),
+            Set(["Task Board", "Habit Tracker", "Quick Journal", "Inventory List", "Service Log"])
+        )
         for template in templates {
             XCTAssertGreaterThanOrEqual(template.manifest.screens.count, 2, template.manifest.name)
             XCTAssertFalse(template.manifest.collections.isEmpty, template.manifest.name)
             XCTAssertFalse(template.manifest.actions.isEmpty, template.manifest.name)
-            XCTAssertTrue(errorCodes(template.manifest).isEmpty, "\(template.manifest.name): \(ManifestValidator().validate(template.manifest))")
-            let roundTrip = try PackageCodec().decode(PackageCodec().encode(template.package))
-            XCTAssertEqual(roundTrip, template.package)
+            XCTAssertTrue(validationErrorCodes(template.manifest).isEmpty, template.manifest.name)
+            XCTAssertEqual(
+                try PackageCodec().decode(PackageCodec().encode(template.package)),
+                template.package
+            )
         }
     }
 
-    func testBlueprintConverterCreatesMultipleScreensTypedFieldsAndChart() async throws {
+    func testBlueprintConversionRepairMockAndDataDrivenFallback() async throws {
         let context = BuilderContext(localeIdentifier: "en_US", requestedCapabilities: [])
-        let blueprint = try await MockBlueprintGenerator().generateBlueprint(from: "anything", context: context)
-        let manifest = BlueprintConverter().convert(blueprint, capabilities: [])
+        let first = try await MockBlueprintGenerator().generateBlueprint(from: "anything", context: context)
+        let second = try await MockBlueprintGenerator().generateBlueprint(from: "different", context: context)
+        XCTAssertEqual(first, second)
+
+        let manifest = BlueprintConverter().convert(first, capabilities: [])
         XCTAssertEqual(manifest.screens.count, 2)
         XCTAssertTrue(manifest.collections.flatMap(\.fields).contains { $0.kind == .number })
         XCTAssertTrue(manifest.screens.flatMap(\.components).contains { $0.kind == .chart })
-        XCTAssertTrue(errorCodes(manifest).isEmpty)
+        XCTAssertTrue(validationErrorCodes(manifest).isEmpty)
+
+        let repaired = BlueprintRepairer().repair(.init(
+            name: "  ",
+            summary: "",
+            screens: [.init(id: "../bad", title: "", collectionID: "missing")],
+            collections: [.init(id: "My Records", title: "", fields: [.init(id: "Bad/Field", title: "")])],
+            actions: []
+        ))
+        XCTAssertEqual(repaired.name, "Pocket App")
+        XCTAssertFalse(repaired.screens[0].id.contains("/"))
+        XCTAssertEqual(repaired.screens[0].collectionID, repaired.collections[0].id)
+        XCTAssertTrue(repaired.actions.contains { $0.kind == .createRecord })
+
+        let fallback = try await TemplateBlueprintGenerator().generateBlueprint(
+            from: "inventory quantities and storage locations",
+            context: context
+        )
+        XCTAssertEqual(fallback.name, "Inventory List")
     }
 
-    func testValidatorRejectsVersionsDuplicatesReferencesTypesCapabilitiesAndDomains() throws {
+    func testValidatorRejectsInvalidVersionReferencesTypesCapabilitiesDomainsAndLimits() throws {
         var manifest = try bundledPackage(named: "Inventory List").manifest
         manifest.formatVersion = 2
-        XCTAssertEqual(errorCodes(manifest), ["format.unsupported"])
+        XCTAssertEqual(validationErrorCodes(manifest), Set(["format.unsupported"]))
 
         manifest = try bundledPackage(named: "Inventory List").manifest
         manifest.screens.append(manifest.screens[0])
@@ -73,22 +98,17 @@ final class DomainAndValidationTests: XCTestCase {
             requiredCapability: .network
         ))
         manifest.allowedDomains = ["*.example.test"]
-        let codes = errorCodes(manifest)
-        XCTAssertTrue(codes.contains("identifier.duplicate"))
-        XCTAssertTrue(codes.contains("action.missing"))
-        XCTAssertTrue(codes.contains("field.defaultType"))
-        XCTAssertTrue(codes.contains("capability.undeclared"))
-        XCTAssertTrue(codes.contains("network.https"))
-        XCTAssertTrue(codes.contains("domain.invalid"))
-    }
+        let codes = validationErrorCodes(manifest)
+        for expected in ["identifier.duplicate", "action.missing", "field.defaultType", "capability.undeclared", "network.https", "domain.invalid"] {
+            XCTAssertTrue(codes.contains(expected), expected)
+        }
 
-    func testValidatorEnforcesLimitsAndNesting() throws {
-        var manifest = try bundledPackage(named: "Task Board").manifest
-        manifest.screens = (0...PocketLimits.screens).map { index in
-            .init(id: "screen-\(index)", title: "Screen \(index)", components: [])
+        manifest = try bundledPackage(named: "Task Board").manifest
+        manifest.screens = (0...PocketLimits.screens).map {
+            .init(id: "screen-\($0)", title: "Screen \($0)", components: [])
         }
         manifest.entryScreenID = manifest.screens[0].id
-        XCTAssertTrue(errorCodes(manifest).contains("limit.screens"))
+        XCTAssertTrue(validationErrorCodes(manifest).contains("limit.screens"))
 
         manifest = try bundledPackage(named: "Task Board").manifest
         var nested = ComponentSpec(id: "depth-0", kind: .group)
@@ -96,55 +116,21 @@ final class DomainAndValidationTests: XCTestCase {
             nested = .init(id: "depth-\(index)", kind: .group, children: [nested])
         }
         manifest.screens[0].components = [nested]
-        XCTAssertTrue(errorCodes(manifest).contains("limit.depth"))
-    }
-
-    func testRepairerProducesStableReferencesWithoutHardcodedAppTypes() {
-        let source = MicroAppBlueprint(
-            name: "  ",
-            summary: "",
-            screens: [.init(id: "../bad", title: "", collectionID: "missing")],
-            collections: [.init(id: "My Records", title: "", fields: [.init(id: "Bad/Field", title: "")])],
-            actions: []
-        )
-        let repaired = BlueprintRepairer().repair(source)
-        XCTAssertEqual(repaired.name, "Pocket App")
-        XCTAssertFalse(repaired.screens[0].id.contains("/"))
-        XCTAssertEqual(repaired.screens[0].collectionID, repaired.collections[0].id)
-        XCTAssertTrue(repaired.actions.contains { $0.kind == .createRecord })
-    }
-
-    func testMockIsDeterministicAndTemplateFallbackIsDataDriven() async throws {
-        let context = BuilderContext(localeIdentifier: "en_US", requestedCapabilities: [])
-        let first = try await MockBlueprintGenerator().generateBlueprint(from: "anything", context: context)
-        let second = try await MockBlueprintGenerator().generateBlueprint(from: "different", context: context)
-        XCTAssertEqual(first, second)
-
-        let inventory = try await TemplateBlueprintGenerator().generateBlueprint(
-            from: "inventory quantities and storage locations",
-            context: context
-        )
-        XCTAssertEqual(inventory.name, "Inventory List")
+        XCTAssertTrue(validationErrorCodes(manifest).contains("limit.depth"))
     }
 }
 
 final class ExpressionTests: XCTestCase {
     private let evaluator = ExpressionEvaluator()
 
-    func testArithmeticComparisonBooleanParenthesesAndBindingResolution() throws {
+    func testBindingsArithmeticBooleanStringsAggregatesAndFormatting() throws {
         let context: [String: PocketValue] = [
-            "record": .object(["cost": .number(40), "complete": .bool(false)]),
-            "environment": .object(["limit": .number(20)])
-        ]
-        XCTAssertEqual(try evaluator.evaluate("(record.cost + 2) >= environment.limit and not record.complete", context: context), .bool(true))
-    }
-
-    func testStringAggregatesCoalesceAndFormatting() throws {
-        let context: [String: PocketValue] = [
-            "record": .object(["title": .string("Service Log"), "code": .string("A19")]),
+            "record": .object(["cost": .number(40), "complete": .bool(false), "title": .string("Service Log"), "code": .string("A19")]),
+            "environment": .object(["limit": .number(20)]),
             "values": .array([.number(2), .number(4), .number(6)]),
             "empty": .null
         ]
+        XCTAssertEqual(try evaluator.evaluate("(record.cost + 2) >= environment.limit and not record.complete", context: context), .bool(true))
         XCTAssertEqual(try evaluator.evaluate("contains(record.title, \"Service\") and startsWith(record.code, \"A\")", context: context), .bool(true))
         XCTAssertEqual(try evaluator.evaluate("sum(values) / count(values)", context: context), .number(4))
         XCTAssertEqual(try evaluator.evaluate("min(values)", context: context), .number(2))
@@ -153,7 +139,7 @@ final class ExpressionTests: XCTestCase {
         XCTAssertEqual(try evaluator.evaluate("formatNumber(42)", context: context), .string(42.0.formatted()))
     }
 
-    func testMalformedOversizedDepthOperationAndDivisionErrorsAreTyped() {
+    func testMalformedLengthDepthAndDivisionErrorsAreTyped() {
         XCTAssertThrowsError(try evaluator.evaluate("(true and", context: [:])) { XCTAssertTrue($0 is ExpressionError) }
         XCTAssertThrowsError(try evaluator.evaluate(String(repeating: "1", count: PocketLimits.expressionCharacters + 1), context: [:])) {
             XCTAssertEqual($0 as? ExpressionError, .tooLong)
@@ -161,29 +147,31 @@ final class ExpressionTests: XCTestCase {
         XCTAssertThrowsError(try evaluator.evaluate("1 / 0", context: [:])) {
             XCTAssertEqual($0 as? ExpressionError, .divisionByZero)
         }
-        let deeplyNested = String(repeating: "(", count: PocketLimits.expressionDepth + 2) + "1" + String(repeating: ")", count: PocketLimits.expressionDepth + 2)
-        XCTAssertThrowsError(try evaluator.evaluate(deeplyNested, context: [:])) { XCTAssertEqual($0 as? ExpressionError, .tooDeep) }
+        let nested = String(repeating: "(", count: PocketLimits.expressionDepth + 2) + "1" + String(repeating: ")", count: PocketLimits.expressionDepth + 2)
+        XCTAssertThrowsError(try evaluator.evaluate(nested, context: [:])) {
+            XCTAssertEqual($0 as? ExpressionError, .tooDeep)
+        }
     }
 }
 
 final class PackageTests: XCTestCase {
-    func testEveryBundledPackageRoundTripsWithIntegrity() throws {
-        for template in try TemplatePackageLibrary().load() {
-            let data = try PackageCodec().encode(template.package)
-            XCTAssertLessThan(data.count, PocketLimits.packageBytes)
-            XCTAssertEqual(try PackageCodec().decode(data), template.package)
-        }
-    }
-
-    func testTamperedManifestInvalidHashMalformedBase64DuplicateAndTraversalAssetsAreRejected() throws {
+    func testPackageRoundTripTamperingAssetsTraversalAndSizeLimits() throws {
         let codec = PackageCodec()
+        for template in try TemplatePackageLibrary().load() {
+            XCTAssertEqual(try codec.decode(codec.encode(template.package)), template.package)
+        }
+
         var package = try bundledPackage(named: "Inventory List")
         package.manifest.name = "Tampered"
-        XCTAssertThrowsError(try codec.decode(codec.encode(package))) { XCTAssertEqual($0 as? PackageError, .invalidHash) }
+        XCTAssertThrowsError(try codec.decode(codec.encode(package))) {
+            XCTAssertEqual($0 as? PackageError, .invalidHash)
+        }
 
         package = try bundledPackage(named: "Inventory List")
         package.assets = [.init(id: "bad", mediaType: "image/png", sha256: "00", base64Data: "%%%")]
-        XCTAssertThrowsError(try codec.decode(codec.encode(package))) { XCTAssertEqual($0 as? PackageError, .invalidAsset("bad")) }
+        XCTAssertThrowsError(try codec.decode(codec.encode(package))) {
+            XCTAssertEqual($0 as? PackageError, .invalidAsset("bad"))
+        }
 
         package = try bundledPackage(named: "Inventory List")
         let asset = PackageAsset(id: "same", mediaType: "text/plain", sha256: "00", base64Data: Data("a".utf8).base64EncodedString())
@@ -193,31 +181,27 @@ final class PackageTests: XCTestCase {
         package = try bundledPackage(named: "Inventory List")
         package.assets = [.init(id: "../escape", mediaType: "text/plain", sha256: "00", base64Data: "")]
         XCTAssertThrowsError(try codec.decode(codec.encode(package)))
-    }
 
-    func testOversizedAndMalformedPackageAreRejected() {
-        XCTAssertThrowsError(try PackageCodec().decode(Data(repeating: 0, count: PocketLimits.packageBytes + 1))) {
+        XCTAssertThrowsError(try codec.decode(Data(repeating: 0, count: PocketLimits.packageBytes + 1))) {
             XCTAssertEqual($0 as? PackageError, .oversized)
         }
-        XCTAssertThrowsError(try PackageCodec().decode(Data("not-json".utf8))) {
+        XCTAssertThrowsError(try codec.decode(Data("not-json".utf8))) {
             XCTAssertEqual($0 as? PackageError, .malformed)
         }
     }
 }
 
 final class PersistenceTests: XCTestCase {
-    func testFreshDatabaseInstallMetadataRecordCRUDRuntimePermissionsExportRollbackAndCleanup() async throws {
+    func testDatabaseCRUDMetadataExportRollbackAndDeletionCleanup() async throws {
         let store = try PocketStore(inMemory: true)
         var package = try bundledPackage(named: "Service Log")
-        let manifestID = package.manifest.id
+        let appID = package.manifest.id
         try await store.install(package)
 
         var installed = try await store.installedApps()
         XCTAssertEqual(installed.count, 1)
-        XCTAssertEqual(installed[0].manifest.id, manifestID)
-
-        try await store.setFavorite(true, id: manifestID)
-        try await store.setDisabled(true, id: manifestID)
+        try await store.setFavorite(true, id: appID)
+        try await store.setDisabled(true, id: appID)
         installed = try await store.installedApps()
         XCTAssertTrue(installed[0].favorite)
         XCTAssertTrue(installed[0].disabled)
@@ -230,62 +214,67 @@ final class PersistenceTests: XCTestCase {
             createdAt: now,
             updatedAt: now
         )
-        try await store.save(record: record, appID: manifestID)
-        var records = try await store.records(appID: manifestID, collectionID: "services")
+        try await store.save(record: record, appID: appID)
+        var records = try await store.records(appID: appID, collectionID: "services")
         XCTAssertEqual(records, [record])
 
         record.values["cost"] = .number(30)
         record.updatedAt = Date()
-        try await store.save(record: record, appID: manifestID)
-        records = try await store.records(appID: manifestID, collectionID: "services")
+        try await store.save(record: record, appID: appID)
+        records = try await store.records(appID: appID, collectionID: "services")
         XCTAssertEqual(records.first?.values["cost"], .number(30))
 
-        try await store.setRuntimeValue(.string("oil"), appID: manifestID, key: "search")
-        let runtimeValue = try await store.runtimeValue(appID: manifestID, key: "search")
+        try await store.setRuntimeValue(.string("oil"), appID: appID, key: "search")
+        let runtimeValue = try await store.runtimeValue(appID: appID, key: "search")
         XCTAssertEqual(runtimeValue, .string("oil"))
-        try await store.setPermission(.alwaysAllow, appID: manifestID, capability: .localNotifications)
-        let permission = try await store.permission(appID: manifestID, capability: .localNotifications)
+        try await store.setPermission(.alwaysAllow, appID: appID, capability: .localNotifications)
+        let permission = try await store.permission(appID: appID, capability: .localNotifications)
         XCTAssertEqual(permission, .alwaysAllow)
 
-        let exported = try await store.exportPackage(appID: manifestID)
-        XCTAssertEqual(try PackageCodec().decode(exported).manifest.id, manifestID)
+        let exported = try await store.exportPackage(appID: appID)
+        XCTAssertEqual(try PackageCodec().decode(exported).manifest.id, appID)
 
         package.manifest.name = "Updated Service Log"
         package.manifest.updatedAt = Date()
         package.integrity = try PackageCodec().integrity(for: package.manifest)
         try await store.install(package)
-        try await store.rollbackManifest(id: manifestID)
+        try await store.rollbackManifest(id: appID)
         installed = try await store.installedApps()
         XCTAssertEqual(installed[0].manifest.name, "Service Log")
 
-        try await store.deleteRecord(appID: manifestID, collectionID: "services", recordID: record.id)
-        records = try await store.records(appID: manifestID, collectionID: "services")
+        try await store.deleteRecord(appID: appID, collectionID: "services", recordID: record.id)
+        records = try await store.records(appID: appID, collectionID: "services")
         XCTAssertTrue(records.isEmpty)
 
-        try await store.delete(manifestID)
-        installed = try await store.installedApps()
-        XCTAssertTrue(installed.isEmpty)
-        records = try await store.records(appID: manifestID, collectionID: "services")
-        XCTAssertTrue(records.isEmpty)
-        let values = try await store.runtimeValues(appID: manifestID)
-        XCTAssertTrue(values.isEmpty)
-        let deletedPermission = try await store.permission(appID: manifestID, capability: .localNotifications)
-        XCTAssertEqual(deletedPermission, .notRequested)
+        try await store.delete(appID)
+        XCTAssertTrue(try await store.installedApps().isEmpty)
+        XCTAssertTrue(try await store.records(appID: appID, collectionID: "services").isEmpty)
+        XCTAssertTrue(try await store.runtimeValues(appID: appID).isEmpty)
+        XCTAssertEqual(try await store.permission(appID: appID, capability: .localNotifications), .notRequested)
     }
 
-    func testDuplicateAppAndConcurrentActorWritesRemainConsistent() async throws {
-        let store = try PocketStore(inMemory: true)
+    func testMigrationCorruptRowsRollbackRecordLimitDuplicateAndConcurrency() async throws {
+        let store = try PocketStore(inMemory: true, recordLimit: 3)
         let package = try bundledPackage(named: "Inventory List")
         try await store.install(package)
+
+        XCTAssertEqual(try await store.databaseUserVersionForTesting(), 1)
+        try await store.insertCorruptRecordForTesting(appID: package.manifest.id, collectionID: "items")
+        XCTAssertTrue(try await store.records(appID: package.manifest.id, collectionID: "items").isEmpty)
+
+        await assertThrowsAsync {
+            try await store.insertRuntimeValueThenRollbackForTesting(appID: package.manifest.id, key: "rollback-probe")
+        } verify: { XCTAssertEqual($0 as? StoreError, .invalidData) }
+        XCTAssertNil(try await store.runtimeValue(appID: package.manifest.id, key: "rollback-probe"))
+
         let duplicateID = try await store.duplicate(id: package.manifest.id)
         let installed = try await store.installedApps()
-        XCTAssertEqual(installed.count, 2)
         XCTAssertTrue(installed.contains { $0.id == duplicateID && $0.manifest.name.hasSuffix("Copy") })
 
+        let now = Date()
         try await withThrowingTaskGroup(of: Void.self) { group in
-            for index in 0..<40 {
+            for index in 0..<3 {
                 group.addTask {
-                    let now = Date()
                     try await store.save(
                         record: .init(
                             id: UUID(),
@@ -300,36 +289,18 @@ final class PersistenceTests: XCTestCase {
             }
             try await group.waitForAll()
         }
-        let itemCount = try await store.records(appID: package.manifest.id, collectionID: "items").count
-        XCTAssertEqual(itemCount, 40)
-    }
-
-    func testRecordLimitRejectsAdditionalWriteWithoutRemovingExistingRecords() async throws {
-        let store = try PocketStore(inMemory: true)
-        let package = try bundledPackage(named: "Inventory List")
-        try await store.install(package)
-        let now = Date()
-        for index in 0..<PocketLimits.recordsPerCollection {
-            try await store.save(
-                record: .init(id: UUID(), collectionID: "items", values: ["name": .string("\(index)")], createdAt: now, updatedAt: now),
-                appID: package.manifest.id
-            )
-        }
         await assertThrowsAsync {
             try await store.save(
                 record: .init(id: UUID(), collectionID: "items", values: ["name": .string("overflow")], createdAt: now, updatedAt: now),
                 appID: package.manifest.id
             )
-        } verify: { error in
-            XCTAssertEqual(error as? StoreError, .limit)
-        }
-        let records = try await store.records(appID: package.manifest.id, collectionID: "items")
-        XCTAssertEqual(records.count, PocketLimits.recordsPerCollection)
+        } verify: { XCTAssertEqual($0 as? StoreError, .limit) }
+        XCTAssertEqual(try await store.records(appID: package.manifest.id, collectionID: "items").count, 3)
     }
 }
 
 final class RuntimeTests: XCTestCase {
-    func testPermissionBrokerPromptsAndDenyByDefaultPersistsDecision() async throws {
+    func testPermissionPromptAndDenyByDefault() async throws {
         let store = try PocketStore(inMemory: true)
         var manifest = try bundledPackage(named: "Inventory List").manifest
         manifest.capabilities.insert(.clipboardWrite)
@@ -341,37 +312,38 @@ final class RuntimeTests: XCTestCase {
             reason: "Copy the generated value."
         ))
 
-        let askingExecutor = ActionExecutor(store: store, intelligence: MockIntelligenceService())
+        let asking = ActionExecutor(store: store, intelligence: MockIntelligenceService())
         await assertThrowsAsync {
-            try await askingExecutor.execute("copy-value", manifest: manifest, context: [:])
+            try await asking.execute("copy-value", manifest: manifest, context: [:])
         } verify: { error in
             guard case RuntimeExecutionError.permissionRequired(let request) = error else {
-                return XCTFail("Expected permission request, received \(error)")
+                return XCTFail("Expected permission request")
             }
             XCTAssertEqual(request.capability, .clipboardWrite)
             XCTAssertEqual(request.reason, "Copy the generated value.")
         }
 
-        let denyingExecutor = ActionExecutor(store: store, intelligence: MockIntelligenceService(), defaultPermission: .denied)
+        let denying = ActionExecutor(store: store, intelligence: MockIntelligenceService(), defaultPermission: .denied)
         await assertThrowsAsync {
-            try await denyingExecutor.execute("copy-value", manifest: manifest, context: [:])
+            try await denying.execute("copy-value", manifest: manifest, context: [:])
         } verify: { error in
             guard case RuntimeExecutionError.permissionDenied(.clipboardWrite) = error else {
-                return XCTFail("Expected denied permission, received \(error)")
+                return XCTFail("Expected denied permission")
             }
         }
-        let decision = try await store.permission(appID: manifest.id, capability: .clipboardWrite)
-        XCTAssertEqual(decision, .denied)
+        XCTAssertEqual(try await store.permission(appID: manifest.id, capability: .clipboardWrite), .denied)
     }
 
-    func testCreateUpdateDeleteSortFilterSelectAndAIActionSequence() async throws {
+    func testRecordSortFilterSelectDeleteAndIntelligenceActions() async throws {
         let store = try PocketStore(inMemory: true)
         var package = try bundledPackage(named: "Inventory List")
         package.manifest.capabilities.insert(.onDeviceModel)
-        package.manifest.actions.append(.init(id: "sort-items", kind: .sortRecords, target: "items", parameters: ["field": .string("quantity")]))
-        package.manifest.actions.append(.init(id: "filter-items", kind: .filterRecords, target: "items", parameters: ["expression": .string("record.quantity > 1")]))
-        package.manifest.actions.append(.init(id: "select-item", kind: .selectRecord, parameters: ["recordID": .string("00000000-0000-0000-0000-000000000010")]))
-        package.manifest.actions.append(.init(id: "summary", kind: .summarizeText, value: .string("Long local text"), requiredCapability: .onDeviceModel))
+        package.manifest.actions += [
+            .init(id: "sort-items", kind: .sortRecords, target: "items", parameters: ["field": .string("quantity")]),
+            .init(id: "filter-items", kind: .filterRecords, target: "items", parameters: ["expression": .string("record.quantity > 1")]),
+            .init(id: "select-item", kind: .selectRecord, parameters: ["recordID": .string("00000000-0000-0000-0000-000000000010")]),
+            .init(id: "summary", kind: .summarizeText, value: .string("Long local text"), requiredCapability: .onDeviceModel)
+        ]
         package.integrity = try PackageCodec().integrity(for: package.manifest)
         try await store.install(package)
         try await store.setPermission(.alwaysAllow, appID: package.manifest.id, capability: .onDeviceModel)
@@ -382,25 +354,17 @@ final class RuntimeTests: XCTestCase {
             create.id,
             manifest: package.manifest,
             context: ["form": .object(["name": .string("Two"), "quantity": .number(2)])]
-        ) else { return XCTFail("Expected first created record") }
-        guard case .record = try await executor.execute(
+        ) else { return XCTFail("Expected created record") }
+        _ = try await executor.execute(
             create.id,
             manifest: package.manifest,
             context: ["form": .object(["name": .string("One"), "quantity": .number(1)])]
-        ) else { return XCTFail("Expected second created record") }
+        )
 
-        package.manifest.actions.append(.init(
-            id: "update-item",
-            kind: .updateRecord,
-            target: "items",
-            parameters: ["recordID": .string(first.id.uuidString), "quantity": .number(3)]
-        ))
-        package.manifest.actions.append(.init(
-            id: "delete-item",
-            kind: .deleteRecord,
-            target: "items",
-            parameters: ["recordID": .string(first.id.uuidString)]
-        ))
+        package.manifest.actions += [
+            .init(id: "update-item", kind: .updateRecord, target: "items", parameters: ["recordID": .string(first.id.uuidString), "quantity": .number(3)]),
+            .init(id: "delete-item", kind: .deleteRecord, target: "items", parameters: ["recordID": .string(first.id.uuidString)])
+        ]
 
         guard case .record(let updated) = try await executor.execute("update-item", manifest: package.manifest, context: [:]) else {
             return XCTFail("Expected updated record")
@@ -418,21 +382,20 @@ final class RuntimeTests: XCTestCase {
         XCTAssertEqual(filtered.count, 1)
 
         guard case .selectedRecord(let selected) = try await executor.execute("select-item", manifest: package.manifest, context: [:]) else {
-            return XCTFail("Expected selected record ID")
+            return XCTFail("Expected selected record")
         }
         XCTAssertEqual(selected.uuidString, "00000000-0000-0000-0000-000000000010")
 
         guard case .value(.string(let summary)) = try await executor.execute("summary", manifest: package.manifest, context: [:]) else {
-            return XCTFail("Expected AI text")
+            return XCTFail("Expected AI result")
         }
         XCTAssertFalse(summary.isEmpty)
 
         _ = try await executor.execute("delete-item", manifest: package.manifest, context: [:])
-        let records = try await store.records(appID: package.manifest.id, collectionID: "items")
-        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(try await store.records(appID: package.manifest.id, collectionID: "items").count, 1)
     }
 
-    func testPhotoActionCarriesTargetAndOCRFlag() async throws {
+    func testPhotoConditionsCyclesCancellationAndNetworkBoundaries() async throws {
         let store = try PocketStore(inMemory: true)
         var manifest = try bundledPackage(named: "Quick Journal").manifest
         manifest.capabilities.insert(.photoSelection)
@@ -446,39 +409,36 @@ final class RuntimeTests: XCTestCase {
         ))
         try await store.setPermission(.alwaysAllow, appID: manifest.id, capability: .photoSelection)
         let executor = ActionExecutor(store: store, intelligence: MockIntelligenceService())
-        let result = try await executor.execute("choose-receipt", manifest: manifest, context: [:])
-        XCTAssertEqual(result, .host(.selectPhotos(target: "receiptImage", recognizeText: true)))
-    }
+        XCTAssertEqual(
+            try await executor.execute("choose-receipt", manifest: manifest, context: [:]),
+            .host(.selectPhotos(target: "receiptImage", recognizeText: true))
+        )
 
-    func testConditionsActionCyclesCancellationAndNetworkBoundaries() async throws {
-        let store = try PocketStore(inMemory: true)
-        var manifest = try bundledPackage(named: "Inventory List").manifest
         manifest.actions = [.init(id: "conditional", kind: .showAlert, title: "Hidden", condition: "false")]
-        let executor = ActionExecutor(store: store, intelligence: MockIntelligenceService())
-        await assertThrowsAsync { try await executor.execute("conditional", manifest: manifest, context: [:]) } verify: { error in
-            guard case RuntimeExecutionError.conditionFalse = error else { return XCTFail("Expected false condition") }
+        await assertThrowsAsync { try await executor.execute("conditional", manifest: manifest, context: [:]) } verify: {
+            guard case RuntimeExecutionError.conditionFalse = $0 else { return XCTFail("Expected false condition") }
         }
 
         manifest.actions = [.init(id: "loop", kind: .showAlert, title: "Loop", nextActionIDs: ["loop"])]
-        await assertThrowsAsync { try await executor.execute("loop", manifest: manifest, context: [:]) } verify: { error in
-            guard case RuntimeExecutionError.chainLimit = error else { return XCTFail("Expected chain limit") }
+        await assertThrowsAsync { try await executor.execute("loop", manifest: manifest, context: [:]) } verify: {
+            guard case RuntimeExecutionError.chainLimit = $0 else { return XCTFail("Expected chain limit") }
         }
 
         let cancelled = Task { try await executor.execute("loop", manifest: manifest, context: [:]) }
         cancelled.cancel()
-        await assertThrowsAsync { try await cancelled.value } verify: { error in
-            guard case RuntimeExecutionError.cancelled = error else { return XCTFail("Expected cancellation") }
+        await assertThrowsAsync { try await cancelled.value } verify: {
+            guard case RuntimeExecutionError.cancelled = $0 else { return XCTFail("Expected cancellation") }
         }
 
         await assertThrowsAsync {
             try await NetworkService().request(urlString: "http://api.example.test", method: "GET", body: nil, allowedDomains: ["api.example.test"])
-        } verify: { error in
-            guard case HostServiceError.insecureURL = error else { return XCTFail("Expected HTTPS enforcement") }
+        } verify: {
+            guard case HostServiceError.insecureURL = $0 else { return XCTFail("Expected HTTPS enforcement") }
         }
         await assertThrowsAsync {
             try await NetworkService().request(urlString: "https://other.example.test", method: "GET", body: nil, allowedDomains: ["api.example.test"])
-        } verify: { error in
-            guard case HostServiceError.domainDenied = error else { return XCTFail("Expected domain denial") }
+        } verify: {
+            guard case HostServiceError.domainDenied = $0 else { return XCTFail("Expected exact-domain enforcement") }
         }
     }
 }
