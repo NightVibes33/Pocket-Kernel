@@ -1,0 +1,82 @@
+name: Apply staging format fix
+
+on:
+  push:
+    branches: [pocketkernel-1.0-full-rebuild]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+      - name: Format actor bootstrap block
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('PocketKernel/Persistence/PocketStore.swift')
+          source = path.read_text()
+          old = '''    private static func migrate(_ database: OpaquePointer?) throws {
+              func raw(_ sql: String) throws {
+                  guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+                      let message = database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite migration error"
+                      throw StoreError.query(message)
+                  }
+              }
+                  try raw("PRAGMA journal_mode=WAL")
+          '''
+          # The previous workflow's here-document lost leading indentation. Normalize by line content.
+          source = source.replace('''    private static func migrate(_ database: OpaquePointer?) throws {
+          func raw(_ sql: String) throws {
+              guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+                  let message = database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite migration error"
+                  throw StoreError.query(message)
+              }
+          }
+              try raw("PRAGMA journal_mode=WAL")
+          ''', old)
+          source = source.replace('''    private static func migrate(_ database: OpaquePointer?) throws {
+          func raw(_ sql: String) throws {
+              guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+                  let message = database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite migration error"
+                  throw StoreError.query(message)
+              }
+          }
+          try raw("PRAGMA journal_mode=WAL")
+          ''', old)
+          source = source.replace('''    private static func migrate(_ database: OpaquePointer?) throws {
+          func raw(_ sql: String) throws {
+              guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+                  let message = database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite migration error"
+                  throw StoreError.query(message)
+              }
+          }
+          ''', '''    private static func migrate(_ database: OpaquePointer?) throws {
+              func raw(_ sql: String) throws {
+                  guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+                      let message = database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite migration error"
+                      throw StoreError.query(message)
+                  }
+              }
+
+          ''')
+          path.write_text(source)
+          PY
+          rm .github/workflows/apply-staging-format-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PocketKernel/Persistence/PocketStore.swift .github/workflows/apply-staging-format-fix.yml
+          if git diff --cached --quiet; then
+            echo 'No formatting change required'
+            exit 0
+          fi
+          git commit -m 'Format Swift 6 database bootstrap'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
