@@ -312,13 +312,13 @@ actor PocketStore {
     }
 
     private static func migrate(_ database: OpaquePointer?) throws {
-    func raw(_ sql: String) throws {
-        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
-            let message = database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite migration error"
-            throw StoreError.query(message)
+        func raw(_ sql: String) throws {
+            guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+                let message = database.map { String(cString: sqlite3_errmsg($0)) } ?? "Unknown SQLite migration error"
+                throw StoreError.query(message)
+            }
         }
-    }
-        try raw("PRAGMA journal_mode=WAL")
+
         try raw("PRAGMA foreign_keys=ON")
         try raw("""
         CREATE TABLE IF NOT EXISTS installed_apps(
