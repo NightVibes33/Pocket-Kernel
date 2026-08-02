@@ -1,1 +1,0 @@
-This staging-only marker verifies whether GitHub branch workflows are being suppressed before the final atomic tree replacement. It is removed in the final staging tree.
