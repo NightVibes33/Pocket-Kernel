@@ -1,8 +1,8 @@
 name: Export PocketKernel Staging Source
 
 on:
-  push:
-    branches: [pocketkernel-1.0-full-rebuild]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
