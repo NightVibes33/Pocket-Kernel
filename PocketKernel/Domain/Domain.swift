@@ -12,6 +12,7 @@ enum PocketLimits {
     static let expressionCharacters = 2_000
     static let expressionDepth = 20
     static let expressionOperations = 5_000
+    static let expressionArrayValues = 5_000
     static let actionChainDepth = 50
 }
 
@@ -290,6 +291,12 @@ struct InstalledAppInfo: Codable, Sendable, Identifiable, Equatable {
     var lastOpenedAt: Date?
     var createdAt: Date
     var updatedAt: Date
+}
+
+struct StoredAsset: Sendable, Equatable {
+    var id: String
+    var mediaType: String
+    var data: Data
 }
 
 struct RuntimeContext: Sendable, Equatable {
