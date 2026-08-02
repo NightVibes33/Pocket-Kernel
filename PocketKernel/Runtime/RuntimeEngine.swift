@@ -30,17 +30,31 @@ enum RuntimeExecutionError: LocalizedError {
 
 actor PermissionBroker {
     private let store: PocketStore
-    init(store: PocketStore) { self.store = store }
+    private let defaultDecision: PermissionDecision
+
+    init(store: PocketStore, defaultDecision: PermissionDecision = .notRequested) {
+        self.store = store
+        self.defaultDecision = defaultDecision == .denied ? .denied : .notRequested
+    }
 
     func authorize(_ capability: PocketCapability, manifest: MicroAppManifest, reason: String) async throws {
         guard manifest.capabilities.contains(capability) else { throw RuntimeExecutionError.capabilityUndeclared(capability) }
         switch try await store.permission(appID: manifest.id, capability: capability) {
-        case .alwaysAllow: return
+        case .alwaysAllow:
+            return
         case .allowOnce:
             try await store.setPermission(.notRequested, appID: manifest.id, capability: capability)
-        case .denied: throw RuntimeExecutionError.permissionDenied(capability)
+            return
+        case .denied:
+            throw RuntimeExecutionError.permissionDenied(capability)
         case .notRequested:
-            throw RuntimeExecutionError.permissionRequired(.init(appID: manifest.id, appName: manifest.name, capability: capability, reason: reason))
+            if defaultDecision == .denied {
+                try await store.setPermission(.denied, appID: manifest.id, capability: capability)
+                throw RuntimeExecutionError.permissionDenied(capability)
+            }
+            throw RuntimeExecutionError.permissionRequired(
+                .init(appID: manifest.id, appName: manifest.name, capability: capability, reason: reason)
+            )
         }
     }
 
@@ -50,11 +64,24 @@ actor PermissionBroker {
 }
 
 enum HostRequest: Sendable, Equatable {
-    case dismiss, sheet(String), share(String), importFile, exportFile, selectPhotos, openURL(String)
+    case dismiss
+    case sheet(String)
+    case share(String)
+    case importFile
+    case exportFile
+    case selectPhotos(target: String, recognizeText: Bool)
+    case openURL(String)
 }
 
 enum ActionResult: Sendable, Equatable {
-    case none, value(PocketValue), navigated(String), alert(String), record(PocketRecord), records([PocketRecord]), host(HostRequest)
+    case none
+    case value(PocketValue)
+    case navigated(String)
+    case alert(String)
+    case record(PocketRecord)
+    case records([PocketRecord])
+    case selectedRecord(UUID)
+    case host(HostRequest)
 }
 
 actor ActionExecutor {
@@ -62,14 +89,19 @@ actor ActionExecutor {
     private let broker: PermissionBroker
     private let intelligence: any IntelligenceServicing
 
-    init(store: PocketStore, intelligence: any IntelligenceServicing = FoundationModelsService()) {
+    init(
+        store: PocketStore,
+        intelligence: any IntelligenceServicing = FoundationModelsService(),
+        defaultPermission: PermissionDecision = .notRequested
+    ) {
         self.store = store
-        self.broker = PermissionBroker(store: store)
+        broker = PermissionBroker(store: store, defaultDecision: defaultPermission)
         self.intelligence = intelligence
     }
 
     func execute(_ actionID: String, manifest: MicroAppManifest, context: [String: PocketValue]) async throws -> ActionResult {
-        try Task.checkCancellation()
+        do { try Task.checkCancellation() }
+        catch { throw RuntimeExecutionError.cancelled }
         var visited = Set<String>()
         return try await execute(actionID, manifest: manifest, context: context, visited: &visited)
     }
@@ -78,21 +110,51 @@ actor ActionExecutor {
         try await broker.decide(decision, request: request)
     }
 
-    private func execute(_ actionID: String, manifest: MicroAppManifest, context: [String: PocketValue], visited: inout Set<String>) async throws -> ActionResult {
-        try Task.checkCancellation()
-        guard visited.count < PocketLimits.actions else { throw RuntimeExecutionError.chainLimit }
+    private func execute(
+        _ actionID: String,
+        manifest: MicroAppManifest,
+        context: [String: PocketValue],
+        visited: inout Set<String>
+    ) async throws -> ActionResult {
+        do { try Task.checkCancellation() }
+        catch { throw RuntimeExecutionError.cancelled }
+        guard visited.count < PocketLimits.actionChainDepth else { throw RuntimeExecutionError.chainLimit }
         guard visited.insert(actionID).inserted else { throw RuntimeExecutionError.chainLimit }
-        guard let action = manifest.actions.first(where: { $0.id == actionID }) else { throw RuntimeExecutionError.actionMissing(actionID) }
-        if let condition = action.condition, try ExpressionEvaluator().evaluate(condition, context: context) != .bool(true) {
+        guard let action = manifest.actions.first(where: { $0.id == actionID }) else {
+            throw RuntimeExecutionError.actionMissing(actionID)
+        }
+        if let condition = action.condition,
+           try ExpressionEvaluator().evaluate(condition, context: context) != .bool(true) {
             throw RuntimeExecutionError.conditionFalse
         }
         if let capability = action.requiredCapability {
-            try await broker.authorize(capability, manifest: manifest, reason: action.reason ?? "Complete \(action.title ?? action.kind.rawValue)")
+            try await broker.authorize(
+                capability,
+                manifest: manifest,
+                reason: action.reason ?? "Complete \(action.title ?? action.kind.rawValue)"
+            )
         }
+
         let result = try await perform(action, manifest: manifest, context: context)
-        try await store.log(appID: manifest.id, level: .info, category: "action", message: "Executed \(action.kind.rawValue).")
+        let payload: PocketValue? = action.target.map { .object(["target": .string($0)]) }
+        try await store.log(
+            appID: manifest.id,
+            level: .info,
+            category: action.kind == .httpGet || action.kind == .httpPostJSON ? "network" : "action",
+            message: "Executed \(action.kind.rawValue).",
+            payload: payload
+        )
+
+        var nextContext = context
+        switch result {
+        case .value(let value): nextContext["lastResult"] = value
+        case .record(let record): nextContext["record"] = .object(record.values)
+        case .records(let records): nextContext["lastRecords"] = .array(records.map { .object($0.values) })
+        case .selectedRecord(let id): nextContext["selectedRecordID"] = .string(id.uuidString)
+        default: break
+        }
         for nextID in action.nextActionIDs {
-            _ = try await execute(nextID, manifest: manifest, context: context, visited: &visited)
+            _ = try await execute(nextID, manifest: manifest, context: nextContext, visited: &visited)
         }
         return result
     }
@@ -116,9 +178,17 @@ actor ActionExecutor {
             else { throw RuntimeExecutionError.invalidParameter("target") }
             let form = object(context["form"]) ?? [:]
             var values = action.parameters
-            for field in collection.fields { values[field.id] = form[field.id] ?? values[field.id] ?? field.defaultValue }
+            for field in collection.fields {
+                values[field.id] = form[field.id] ?? values[field.id] ?? field.defaultValue
+            }
             let now = Date()
-            let record = PocketRecord(id: UUID(), collectionID: collectionID, values: values, createdAt: now, updatedAt: now)
+            let record = PocketRecord(
+                id: UUID(),
+                collectionID: collectionID,
+                values: values,
+                createdAt: now,
+                updatedAt: now
+            )
             try await store.save(record: record, appID: manifest.id)
             return .record(record)
 
@@ -126,9 +196,9 @@ actor ActionExecutor {
             guard let collectionID = action.target,
                   let id = recordID(action: action, context: context)
             else { throw RuntimeExecutionError.invalidParameter("recordID") }
-            guard var record = try await store.records(appID: manifest.id, collectionID: collectionID).first(where: { $0.id == id }) else {
-                throw RuntimeExecutionError.invalidParameter("recordID")
-            }
+            guard var record = try await store.records(appID: manifest.id, collectionID: collectionID)
+                .first(where: { $0.id == id })
+            else { throw RuntimeExecutionError.invalidParameter("recordID") }
             let form = object(context["form"]) ?? [:]
             for (key, value) in action.parameters where key != "recordID" { record.values[key] = value }
             for (key, value) in form { record.values[key] = value }
@@ -158,20 +228,31 @@ actor ActionExecutor {
             let expression = string(action.parameters["expression"]) ?? action.condition ?? "true"
             let state = object(context["state"]) ?? [:]
             let records = try await store.records(appID: manifest.id, collectionID: collectionID).filter { record in
-                let evaluationContext: [String: PocketValue] = ["record": .object(record.values), "state": .object(state), "environment": context["environment"] ?? .object([:])]
+                let evaluationContext: [String: PocketValue] = [
+                    "record": .object(record.values),
+                    "state": .object(state),
+                    "environment": context["environment"] ?? .object([:])
+                ]
                 return (try? ExpressionEvaluator().evaluate(expression, context: evaluationContext)) == .bool(true)
             }
             return .records(records)
 
         case .navigate:
-            guard let target = action.target, manifest.screens.contains(where: { $0.id == target }) else { throw RuntimeExecutionError.invalidParameter("target") }
+            guard let target = action.target, manifest.screens.contains(where: { $0.id == target }) else {
+                throw RuntimeExecutionError.invalidParameter("target")
+            }
             return .navigated(target)
-        case .dismiss: return .host(.dismiss)
-        case .showSheet: return .host(.sheet(action.target ?? action.title ?? "Details"))
-        case .showAlert, .showConfirmation: return .alert(action.title ?? string(action.value) ?? "Done")
+        case .dismiss:
+            return .host(.dismiss)
+        case .showSheet:
+            return .host(.sheet(action.target ?? action.title ?? "Details"))
+        case .showAlert, .showConfirmation:
+            return .alert(action.title ?? string(action.value) ?? "Done")
         case .selectRecord:
-            guard let id = recordID(action: action, context: context) else { throw RuntimeExecutionError.invalidParameter("recordID") }
-            return .value(.string(id.uuidString))
+            guard let id = recordID(action: action, context: context) else {
+                throw RuntimeExecutionError.invalidParameter("recordID")
+            }
+            return .selectedRecord(id)
 
         case .copyToClipboard:
             let text = string(action.value) ?? string(context["value"]) ?? ""
@@ -179,21 +260,35 @@ actor ActionExecutor {
             return .none
         case .share:
             return .host(.share(string(action.value) ?? string(context["value"]) ?? ""))
-        case .importFile: return .host(.importFile)
-        case .exportFile: return .host(.exportFile)
-        case .selectPhotos: return .host(.selectPhotos)
+        case .importFile:
+            return .host(.importFile)
+        case .exportFile:
+            return .host(.exportFile)
+        case .selectPhotos:
+            return .host(.selectPhotos(
+                target: normalizedStateKey(action.target ?? "selectedPhoto"),
+                recognizeText: bool(action.parameters["recognizeText"]) ?? false
+            ))
         case .scheduleLocalNotification:
             let body = string(action.parameters["body"]) ?? action.title ?? manifest.name
             let seconds = number(action.parameters["seconds"]) ?? 1
             try await NotificationService().schedule(title: manifest.name, body: body, after: seconds)
             return .none
         case .openURL:
-            guard let target = action.target, let url = URL(string: target), url.scheme?.lowercased() == "https" else { throw RuntimeExecutionError.invalidParameter("target") }
+            guard let target = action.target,
+                  let url = URL(string: target),
+                  url.scheme?.lowercased() == "https"
+            else { throw RuntimeExecutionError.invalidParameter("target") }
             return .host(.openURL(target))
 
         case .httpGet, .httpPostJSON:
             guard let target = action.target else { throw RuntimeExecutionError.invalidParameter("target") }
-            let result = try await NetworkService().request(urlString: target, method: action.kind == .httpGet ? "GET" : "POST", body: action.value, allowedDomains: manifest.allowedDomains)
+            let result = try await NetworkService().request(
+                urlString: target,
+                method: action.kind == .httpGet ? "GET" : "POST",
+                body: action.value,
+                allowedDomains: manifest.allowedDomains
+            )
             return .value(result)
 
         case .generateText, .summarizeText, .extractFields, .classifyText, .rewriteText:
@@ -217,7 +312,9 @@ actor ActionExecutor {
     }
 
     private func recordID(action: ActionSpec, context: [String: PocketValue]) -> UUID? {
-        let raw = string(action.parameters["recordID"]) ?? string(context["selectedRecordID"])
+        let raw = string(action.parameters["recordID"])
+            ?? string(context["selectedRecordID"])
+            ?? string(object(context["state"])?["selectedRecordID"])
         return raw.flatMap(UUID.init(uuidString:))
     }
 
