@@ -10,4 +10,4 @@ The shipped built-in apps are real validated `.pocketapp` resources with screens
 
 The generated blueprint preserves typed component trees, field options/defaults, action conditions/parameters/chaining, and exact network domains instead of forcing every request into a preset tracker layout.
 
-The bounded runtime undo stack and RuntimeView compiler simplifications are now committed. Trigger the clean user-authored verification run for tests, ARM64 device build, and IPA validation.
+The bounded runtime undo stack and RuntimeView compiler simplifications are committed. Apply the exact missing-return fix in RuntimeEngine, remove its one-time helper, and launch the clean verification run.
