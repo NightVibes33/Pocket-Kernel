@@ -247,10 +247,14 @@ final class PersistenceTests: XCTestCase {
         XCTAssertTrue(records.isEmpty)
 
         try await store.delete(appID)
-        XCTAssertTrue(try await store.installedApps().isEmpty)
-        XCTAssertTrue(try await store.records(appID: appID, collectionID: "services").isEmpty)
-        XCTAssertTrue(try await store.runtimeValues(appID: appID).isEmpty)
-        XCTAssertEqual(try await store.permission(appID: appID, capability: .localNotifications), .notRequested)
+        let appsAfterDelete = try await store.installedApps()
+        let recordsAfterDelete = try await store.records(appID: appID, collectionID: "services")
+        let valuesAfterDelete = try await store.runtimeValues(appID: appID)
+        let permissionAfterDelete = try await store.permission(appID: appID, capability: .localNotifications)
+        XCTAssertTrue(appsAfterDelete.isEmpty)
+        XCTAssertTrue(recordsAfterDelete.isEmpty)
+        XCTAssertTrue(valuesAfterDelete.isEmpty)
+        XCTAssertEqual(permissionAfterDelete, .notRequested)
     }
 
     func testMigrationCorruptRowsRollbackRecordLimitDuplicateAndConcurrency() async throws {
@@ -258,14 +262,17 @@ final class PersistenceTests: XCTestCase {
         let package = try bundledPackage(named: "Inventory List")
         try await store.install(package)
 
-        XCTAssertEqual(try await store.databaseUserVersionForTesting(), 1)
+        let version = try await store.databaseUserVersionForTesting()
+        XCTAssertEqual(version, 1)
         try await store.insertCorruptRecordForTesting(appID: package.manifest.id, collectionID: "items")
-        XCTAssertTrue(try await store.records(appID: package.manifest.id, collectionID: "items").isEmpty)
+        let corruptRows = try await store.records(appID: package.manifest.id, collectionID: "items")
+        XCTAssertTrue(corruptRows.isEmpty)
 
         await assertThrowsAsync {
             try await store.insertRuntimeValueThenRollbackForTesting(appID: package.manifest.id, key: "rollback-probe")
         } verify: { XCTAssertEqual($0 as? StoreError, .invalidData) }
-        XCTAssertNil(try await store.runtimeValue(appID: package.manifest.id, key: "rollback-probe"))
+        let rolledBackValue = try await store.runtimeValue(appID: package.manifest.id, key: "rollback-probe")
+        XCTAssertNil(rolledBackValue)
 
         let duplicateID = try await store.duplicate(id: package.manifest.id)
         let installed = try await store.installedApps()
@@ -295,7 +302,8 @@ final class PersistenceTests: XCTestCase {
                 appID: package.manifest.id
             )
         } verify: { XCTAssertEqual($0 as? StoreError, .limit) }
-        XCTAssertEqual(try await store.records(appID: package.manifest.id, collectionID: "items").count, 3)
+        let finalRecords = try await store.records(appID: package.manifest.id, collectionID: "items")
+        XCTAssertEqual(finalRecords.count, 3)
     }
 }
 
@@ -331,7 +339,8 @@ final class RuntimeTests: XCTestCase {
                 return XCTFail("Expected denied permission")
             }
         }
-        XCTAssertEqual(try await store.permission(appID: manifest.id, capability: .clipboardWrite), .denied)
+        let decision = try await store.permission(appID: manifest.id, capability: .clipboardWrite)
+        XCTAssertEqual(decision, .denied)
     }
 
     func testRecordSortFilterSelectDeleteAndIntelligenceActions() async throws {
@@ -392,7 +401,8 @@ final class RuntimeTests: XCTestCase {
         XCTAssertFalse(summary.isEmpty)
 
         _ = try await executor.execute("delete-item", manifest: package.manifest, context: [:])
-        XCTAssertEqual(try await store.records(appID: package.manifest.id, collectionID: "items").count, 1)
+        let remaining = try await store.records(appID: package.manifest.id, collectionID: "items")
+        XCTAssertEqual(remaining.count, 1)
     }
 
     func testPhotoConditionsCyclesCancellationAndNetworkBoundaries() async throws {
@@ -409,10 +419,8 @@ final class RuntimeTests: XCTestCase {
         ))
         try await store.setPermission(.alwaysAllow, appID: manifest.id, capability: .photoSelection)
         let executor = ActionExecutor(store: store, intelligence: MockIntelligenceService())
-        XCTAssertEqual(
-            try await executor.execute("choose-receipt", manifest: manifest, context: [:]),
-            .host(.selectPhotos(target: "receiptImage", recognizeText: true))
-        )
+        let photoResult = try await executor.execute("choose-receipt", manifest: manifest, context: [:])
+        XCTAssertEqual(photoResult, .host(.selectPhotos(target: "receiptImage", recognizeText: true)))
 
         manifest.actions = [.init(id: "conditional", kind: .showAlert, title: "Hidden", condition: "false")]
         await assertThrowsAsync { try await executor.execute("conditional", manifest: manifest, context: [:]) } verify: {
