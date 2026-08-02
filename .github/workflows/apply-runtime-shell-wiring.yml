@@ -1,0 +1,167 @@
+name: Apply PocketKernel Runtime Shell Wiring
+
+on:
+  pull_request:
+    branches: [main]
+    types: [reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.ref == 'pocketkernel-1.0-full-rebuild'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+      - name: Apply guarded shell changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('PocketKernel/Shell/RootTabView.swift')
+          source = path.read_text()
+
+          def replace(old, new, count=1):
+              global source
+              actual = source.count(old)
+              if actual < count:
+                  raise SystemExit(f'Missing expected RootTabView fragment: {old[:120]!r}')
+              source = source.replace(old, new, count)
+
+          replace(
+              'import FoundationModels\nimport SwiftUI\nimport UIKit\nimport UniformTypeIdentifiers',
+              'import FoundationModels\nimport PhotosUI\nimport SwiftUI\nimport UIKit\nimport UniformTypeIdentifiers'
+          )
+
+          replace(
+              'Section("Built-in Templates") { ForEach(TemplateCatalog.all, id: \\.name) { blueprint in Button { Task { await environment.installTemplate(blueprint) } } label: { Label(blueprint.name, systemImage: "square.dashed") } } }',
+              'Section("Built-in Pocket Apps") { ForEach(environment.builtInTemplates) { template in Button { Task { await environment.installTemplate(template) } } label: { Label(template.manifest.name, systemImage: template.manifest.icon.symbol) } } }'
+          )
+
+          replace(
+              '    @State private var runtimeValues: [String: PocketValue] = [:]\n    @State private var executor: ActionExecutor?',
+              '    @State private var runtimeValues: [String: PocketValue] = [:]\n    @State private var assetData: [String: Data] = [:]\n    @State private var selectingActionPhoto = false\n    @State private var actionPhotoItem: PhotosPickerItem?\n    @State private var actionPhotoTarget = "selectedPhoto"\n    @State private var actionPhotoRecognizeText = false\n    @State private var executor: ActionExecutor?'
+          )
+
+          replace(
+              'ComponentRenderer(component: component, recordsByCollection: recordsByCollection, runtimeValues: $runtimeValues, runAction: runAction, importFile: { importing = true }, exportFile: prepareExport)',
+              'ComponentRenderer(component: component, recordsByCollection: recordsByCollection, collectionSpecs: Dictionary(uniqueKeysWithValues: manifest.collections.map { ($0.id, $0) }), assetData: assetData, runtimeValues: $runtimeValues, runAction: runAction, importFile: { importing = true }, exportFile: prepareExport)'
+          )
+
+          replace(
+              '        .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .pocketApp, defaultFilename: manifest.name) { if case .failure(let error) = $0 { runtimeError = error.localizedDescription } }\n        .sheet(isPresented:',
+              '        .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .pocketApp, defaultFilename: manifest.name) { if case .failure(let error) = $0 { runtimeError = error.localizedDescription } }\n        .photosPicker(isPresented: $selectingActionPhoto, selection: $actionPhotoItem, matching: .images)\n        .task(id: actionPhotoItem) { await loadActionPhoto() }\n        .sheet(isPresented:'
+          )
+
+          replace(
+              '    private func startRuntime() async { guard !previewOnly, let store = environment.store else { return }; executor = ActionExecutor(store: store, intelligence: environment.intelligence); environment.lifecycle.markRuntimeOpen(appID: manifest.id); await reload() }',
+              '    private func startRuntime() async { guard !previewOnly, let store = environment.store else { return }; let configured = PermissionDecision(rawValue: UserDefaults.standard.string(forKey: "PKDefaultPermission") ?? "") ?? .notRequested; executor = ActionExecutor(store: store, intelligence: environment.intelligence, defaultPermission: configured); environment.lifecycle.markRuntimeOpen(appID: manifest.id); await reload() }'
+          )
+
+          replace(
+              '    private func reload() async { guard !previewOnly, let store = environment.store else { return }; for collection in manifest.collections { recordsByCollection[collection.id] = (try? await store.records(appID: manifest.id, collectionID: collection.id)) ?? [] }; runtimeValues = (try? await store.runtimeValues(appID: manifest.id)) ?? [:] }',
+              '    private func reload() async { guard !previewOnly, let store = environment.store else { return }; for collection in manifest.collections { recordsByCollection[collection.id] = (try? await store.records(appID: manifest.id, collectionID: collection.id)) ?? [] }; runtimeValues = (try? await store.runtimeValues(appID: manifest.id)) ?? [:]; for assetID in manifestAssetIDs { if let data = await environment.assetData(appID: manifest.id, assetID: assetID) { assetData[assetID] = data } } }'
+          )
+
+          replace(
+              '    private func execute(_ id: String, form: [String: PocketValue]) { guard let executor else { return }; Task { do { let collections = recordsByCollection.mapValues { PocketValue.array($0.map { .object($0.values) }) }; let context: [String: PocketValue] = ["state": .object(runtimeValues), "form": .object(form), "collections": .object(collections), "environment": .object(["currentDate": .date(Date())])]; let result = try await executor.execute(id, manifest: manifest, context: context); await apply(result); await reload() } catch RuntimeExecutionError.permissionRequired(let request) { permissionRequest = request } catch { runtimeError = error.localizedDescription } } }',
+              '    private func execute(_ id: String, form: [String: PocketValue]) { guard let executor else { return }; Task { do { let collections = recordsByCollection.mapValues { PocketValue.array($0.map { .object($0.values) }) }; let inlineForm = Dictionary(uniqueKeysWithValues: runtimeValues.compactMap { key, value in key.hasPrefix("form.") ? (String(key.dropFirst(5)), value) : nil }); let mergedForm = inlineForm.merging(form) { _, explicit in explicit }; let context: [String: PocketValue] = ["state": .object(runtimeValues), "form": .object(mergedForm), "selectedRecordID": runtimeValues["selectedRecordID"] ?? .null, "collections": .object(collections), "environment": .object(["currentDate": .date(Date())])]; let result = try await executor.execute(id, manifest: manifest, context: context); await apply(result); await reload() } catch RuntimeExecutionError.permissionRequired(let request) { permissionRequest = request } catch { runtimeError = error.localizedDescription } } }'
+          )
+
+          replace(
+              '        case .records(let records): if let collection = records.first?.collectionID { recordsByCollection[collection] = records }\n        case .host(let request):',
+              '        case .records(let records): if let collection = records.first?.collectionID { recordsByCollection[collection] = records }\n        case .selectedRecord(let id): runtimeValues["selectedRecordID"] = .string(id.uuidString); persist(["selectedRecordID": .string(id.uuidString)])\n        case .host(let request):'
+          )
+
+          replace(
+              '            case .selectPhotos: runtimeAlert = "Use a photo picker component to select an image."',
+              '            case .selectPhotos(let target, let recognizeText): actionPhotoTarget = target; actionPhotoRecognizeText = recognizeText; actionPhotoItem = nil; selectingActionPhoto = true'
+          )
+
+          marker = '    private func decide(_ decision: PermissionDecision)'
+          if marker not in source:
+              raise SystemExit('Missing permission decision insertion marker')
+          helpers = '''    private var manifestAssetIDs: Set<String> {
+        func collect(_ components: [ComponentSpec]) -> Set<String> {
+            components.reduce(into: Set<String>()) { result, component in
+                if let assetID = component.assetID { result.insert(assetID) }
+                result.formUnion(collect(component.children))
+            }
+        }
+        return manifest.screens.reduce(into: Set<String>()) { $0.formUnion(collect($1.components)) }
+    }
+
+    private func loadActionPhoto() async {
+        guard let item = actionPhotoItem else { return }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self), data.count <= PocketLimits.assetBytes else { throw HostServiceError.invalidInput }
+            let encoded = PocketValue.string(data.base64EncodedString())
+            runtimeValues[actionPhotoTarget] = encoded
+            if let store = environment.store { try await store.setRuntimeValue(encoded, appID: manifest.id, key: actionPhotoTarget) }
+            if actionPhotoRecognizeText {
+                let text = try await VisionTextService().recognizeText(in: data)
+                let textKey = "\\(actionPhotoTarget).recognizedText"
+                runtimeValues[textKey] = .string(text)
+                if let store = environment.store { try await store.setRuntimeValue(.string(text), appID: manifest.id, key: textKey) }
+            }
+        } catch { runtimeError = error.localizedDescription }
+        actionPhotoItem = nil
+    }
+
+    private func formPhotoBinding(for fieldID: String) -> Binding<PhotosPickerItem?> {
+        Binding(get: { nil }, set: { item in
+            guard let item else { return }
+            Task {
+                do {
+                    guard let data = try await item.loadTransferable(type: Data.self), data.count <= PocketLimits.assetBytes else { throw HostServiceError.invalidInput }
+                    formValues[fieldID] = .string(data.base64EncodedString())
+                } catch { runtimeError = error.localizedDescription }
+            }
+        })
+    }
+
+'''
+          source = source.replace(marker, helpers + marker, 1)
+
+          pattern = re.compile(r'    @ViewBuilder private func fieldEditor\(_ field: FieldSpec\) -> some View \{.*?\n    \}\n\n    private func persist', re.S)
+          replacement = '''    @ViewBuilder private func fieldEditor(_ field: FieldSpec) -> some View {
+        switch field.kind {
+        case .text:
+            TextField(field.title, text: Binding(get: { formValues[field.id]?.displayString ?? "" }, set: { formValues[field.id] = .string($0) }))
+        case .multilineText:
+            TextField(field.title, text: Binding(get: { formValues[field.id]?.displayString ?? "" }, set: { formValues[field.id] = .string($0) }), axis: .vertical).lineLimit(3...8)
+        case .number:
+            TextField(field.title, value: Binding(get: { if case .number(let value) = formValues[field.id] { value } else { 0 } }, set: { formValues[field.id] = .number($0) }), format: .number).keyboardType(.decimalPad)
+        case .boolean:
+            Toggle(field.title, isOn: Binding(get: { if case .bool(let value) = formValues[field.id] { value } else { false } }, set: { formValues[field.id] = .bool($0) }))
+        case .date:
+            DatePicker(field.title, selection: Binding(get: { if case .date(let value) = formValues[field.id] { value } else { Date() } }, set: { formValues[field.id] = .date($0) }))
+        case .choice:
+            Picker(field.title, selection: Binding(get: { formValues[field.id]?.stringValue ?? field.options.first ?? "" }, set: { formValues[field.id] = .string($0) })) { ForEach(field.options, id: \\.self) { Text($0).tag($0) } }
+        case .image:
+            PhotosPicker(selection: formPhotoBinding(for: field.id), matching: .images) { Label(formValues[field.id] == nil ? "Choose \\(field.title)" : "Replace \\(field.title)", systemImage: "photo.on.rectangle") }
+        }
+    }
+
+    private func persist'''
+          source, replacements = pattern.subn(replacement, source, count=1)
+          if replacements != 1:
+              raise SystemExit('Could not replace runtime field editor')
+
+          path.write_text(source)
+          PY
+
+          swiftformat PocketKernel/Shell/RootTabView.swift --config .swiftformat
+          rm .github/workflows/apply-runtime-shell-wiring.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PocketKernel/Shell/RootTabView.swift .github/workflows/apply-runtime-shell-wiring.yml
+          git commit -m 'Wire data-driven templates permissions and photo actions'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
