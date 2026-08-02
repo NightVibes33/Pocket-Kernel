@@ -1,6 +1,8 @@
 name: Build PocketKernel Unsigned IPA
 
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       publish_release:
@@ -154,7 +156,7 @@ jobs:
           retention-days: 90
 
       - name: Publish GitHub release
-        if: success() && inputs.publish_release
+        if: success() && github.event_name == 'workflow_dispatch' && inputs.publish_release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
