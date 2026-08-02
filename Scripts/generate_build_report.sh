@@ -1,25 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ipa="${1:?Missing IPA}"; report="${2:?Missing report}"; work_dir="$(mktemp -d)"; trap 'rm -rf "$work_dir"' EXIT
-unzip -q "$ipa" -d "$work_dir"; app="$work_dir/Payload/PocketKernel.app"; plist="$app/Info.plist"; exe="$app/PocketKernel"
-cat >"$report" <<REPORT
+IPA="${1:?Missing IPA path}"
+REPORT="${2:?Missing report path}"
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+unzip -q "$IPA" -d "$WORK_DIR"
+APP="$WORK_DIR/Payload/PocketKernel.app"
+EXECUTABLE="$APP/PocketKernel"
+SHA="$(shasum -a 256 "$IPA" | awk '{print $1}')"
+SIZE="$(stat -f%z "$IPA")"
+cat > "$REPORT" <<EOF
 # PocketKernel Build Report
 
 - Git commit: ${GITHUB_SHA:-local}
-- Workflow run: ${GITHUB_RUN_ID:-local}
+- Workflow run: ${GITHUB_RUN_NUMBER:-local}
 - Runner architecture: $(uname -m)
 - macOS: $(sw_vers -productVersion)
 - Xcode: $(xcodebuild -version | tr '\n' ' ')
 - Swift: $(swift --version | head -1)
 - iPhoneOS SDK: $(xcrun --sdk iphoneos --show-sdk-version)
-- Bundle identifier: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")
-- Marketing version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
-- Build number: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")
-- Minimum OS: $(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$plist")
-- Binary architecture: $(lipo -archs "$exe")
-- IPA bytes: $(stat -f%z "$ipa")
-- SHA-256: $(shasum -a 256 "$ipa" | awk '{print $1}')
-- Unit/UI tests: passed before device build
-- Signing state: unsigned (no CodeResources or provisioning profile)
-REPORT
-
+- Bundle identifier: $(plutil -extract CFBundleIdentifier raw "$APP/Info.plist")
+- Marketing version: $(plutil -extract CFBundleShortVersionString raw "$APP/Info.plist")
+- Build number: $(plutil -extract CFBundleVersion raw "$APP/Info.plist")
+- Minimum OS: $(plutil -extract MinimumOSVersion raw "$APP/Info.plist")
+- Binary architecture: $(lipo -archs "$EXECUTABLE")
+- IPA bytes: $SIZE
+- SHA-256: $SHA
+- Unit/UI test gate: ${PK_TEST_RESULT:-passed}
+- Signing state: unsigned; no embedded provisioning profile or code-signature directory
+EOF

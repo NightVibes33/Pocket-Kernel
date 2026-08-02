@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
-app_path="${1:?Missing app path}"; ipa_path="${2:?Missing IPA path}"
-test -d "$app_path"; test -f "$app_path/PocketKernel"
-work_dir="$(mktemp -d)"; trap 'rm -rf "$work_dir"' EXIT
-mkdir -p "$work_dir/Payload"; cp -R "$app_path" "$work_dir/Payload/PocketKernel.app"
-find "$work_dir/Payload" -name _CodeSignature -type d -prune -exec rm -rf {} +
-find "$work_dir/Payload" -name embedded.mobileprovision -delete
-find "$work_dir/Payload" -name .DS_Store -delete
-mkdir -p "$(dirname "$ipa_path")"
-(cd "$work_dir" && /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload "$ipa_path")
-unzip -t "$ipa_path"
-
+APP_PATH="${1:?Missing app path}"
+IPA_PATH="${2:?Missing IPA path}"
+test -d "$APP_PATH"
+test -f "$APP_PATH/PocketKernel"
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+mkdir -p "$WORK_DIR/Payload"
+cp -R "$APP_PATH" "$WORK_DIR/Payload/PocketKernel.app"
+find "$WORK_DIR/Payload" -name '_CodeSignature' -type d -prune -exec rm -rf {} +
+find "$WORK_DIR/Payload" -name 'embedded.mobileprovision' -delete
+find "$WORK_DIR/Payload" -name '.DS_Store' -delete
+mkdir -p "$(dirname "$IPA_PATH")"
+(
+  cd "$WORK_DIR"
+  /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload "$IPA_PATH"
+)
+unzip -t "$IPA_PATH" >/dev/null

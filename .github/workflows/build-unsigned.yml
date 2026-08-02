@@ -1,7 +1,9 @@
 name: Build PocketKernel Unsigned IPA
+
 on:
   push:
-    branches: [main]
+    branches:
+      - pocketkernel-1.0-full-rebuild
   workflow_dispatch:
     inputs:
       publish_release:
@@ -9,16 +11,19 @@ on:
         required: true
         default: true
         type: boolean
+
 permissions:
   contents: write
+
 concurrency:
-  group: pocketkernel-one-shot-build
+  group: pocketkernel-one-shot-build-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   build:
     name: Test, Build, Validate, Package
     runs-on: macos-26-intel
-    timeout-minutes: 45
+    timeout-minutes: 50
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
       PROJECT: PocketKernel.xcodeproj
@@ -27,73 +32,120 @@ jobs:
       DERIVED_DATA: ${{ github.workspace }}/build/DerivedData
       RESULT_BUNDLE: ${{ github.workspace }}/build/TestResults.xcresult
       OUTPUT_DIR: ${{ github.workspace }}/output
+
     steps:
-      - uses: actions/checkout@v6
-        with: {fetch-depth: 1, persist-credentials: false}
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify runner and Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "x86_64"
+          test -d "$DEVELOPER_DIR"
+          sw_vers
+          xcodebuild -version
+          swift --version
+          SDK_VERSION="$(xcrun --sdk iphoneos --show-sdk-version)"
+          case "$SDK_VERSION" in
+            26.*) ;;
+            *) echo "Unexpected iPhoneOS SDK: $SDK_VERSION"; exit 1 ;;
+          esac
+
       - name: Prepare directories
+        shell: bash
         run: |
           set -euo pipefail
           rm -rf build output
           mkdir -p build output
-      - name: Verify runner and Xcode
-        run: |
-          set -euo pipefail
-          test "$(uname -m)" = x86_64
-          test -d "$DEVELOPER_DIR"
-          xcodebuild -version; swift --version
-          [[ "$(xcrun --sdk iphoneos --show-sdk-version)" == 26.* ]]
-      - name: Prepare and inspect
-        run: |
-          set -euo pipefail
           chmod +x Scripts/*.sh Scripts/*.py
+
+      - name: Validate project and source
+        shell: bash
+        run: |
+          set -euo pipefail
           xcodebuild -project "$PROJECT" -scheme "$SCHEME" -showBuildSettings > build/build-settings.txt
-          grep -q 'IPHONEOS_DEPLOYMENT_TARGET = 26.0' build/build-settings.txt
-          grep -q 'PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel' build/build-settings.txt
+          grep -q "IPHONEOS_DEPLOYMENT_TARGET = 26.0" build/build-settings.txt
+          grep -q "PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel" build/build-settings.txt
+          grep -q "SWIFT_STRICT_CONCURRENCY = complete" build/build-settings.txt
+          grep -q "ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon" build/build-settings.txt
           Scripts/scan_source.sh
           Scripts/validate_templates.py PocketKernel/Templates
-          swiftformat PocketKernel PocketKernelTests PocketKernelUITests --lint
+          swiftformat PocketKernel PocketKernelTests PocketKernelUITests --lint --config .swiftformat
           swiftlint lint --strict --config .swiftlint.yml
-      - name: Select simulator
+
+      - name: Select and boot iOS 26 simulator
         id: simulator
+        shell: bash
         run: |
           set -euo pipefail
-          udid="$(Scripts/select_simulator.sh)"
-          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          UDID="$(Scripts/select_simulator.sh)"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
           xcrun simctl shutdown all || true
-          xcrun simctl boot "$udid"
-          ready=false
-          for attempt in $(seq 1 120); do
-            state="$(xcrun simctl list devices -j | /usr/bin/python3 -c 'import json,sys; data=json.load(sys.stdin)["devices"]; target=sys.argv[1]; print(next((d["state"] for devices in data.values() for d in devices if d["udid"] == target), "Missing"))' "$udid")"
-            if [ "$state" = Booted ]; then
-              ready=true
-              break
-            fi
-            sleep 2
-          done
-          if [ "$ready" != true ]; then
-            echo "Simulator $udid did not reach Booted state within four minutes"
-            xcrun simctl list devices
-            exit 1
-          fi
-      - name: Run tests with deterministic model
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Run unit and UI tests with deterministic model
+        shell: bash
         run: |
           set -o pipefail
-          xcodebuild test -project "$PROJECT" -scheme "$SCHEME" -testPlan "$TEST_PLAN" -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' -derivedDataPath "$DERIVED_DATA" -resultBundlePath "$RESULT_BUNDLE" -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO 2>&1 | tee "$OUTPUT_DIR/xcodebuild-test.log"
-      - name: Build ARM64 device app
+          xcodebuild test \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -testPlan "$TEST_PLAN" \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -resultBundlePath "$RESULT_BUNDLE" \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            2>&1 | tee "$OUTPUT_DIR/xcodebuild-test.log"
+          grep -q '\*\* TEST SUCCEEDED \*\*' "$OUTPUT_DIR/xcodebuild-test.log"
+
+      - name: Build Release app for physical iOS devices
+        shell: bash
         run: |
           set -o pipefail
-          xcodebuild clean build -project "$PROJECT" -scheme "$SCHEME" -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$DERIVED_DATA" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' DEVELOPMENT_TEAM='' 2>&1 | tee "$OUTPUT_DIR/xcodebuild-device.log"
+          xcodebuild clean build \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            2>&1 | tee "$OUTPUT_DIR/xcodebuild-device.log"
+          grep -q '\*\* BUILD SUCCEEDED \*\*' "$OUTPUT_DIR/xcodebuild-device.log"
+
       - name: Package and validate unsigned IPA
+        shell: bash
+        env:
+          PK_TEST_RESULT: passed
         run: |
-          Scripts/build_unsigned_ipa.sh "$DERIVED_DATA/Build/Products/Release-iphoneos/PocketKernel.app" "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
+          set -euo pipefail
+          Scripts/build_unsigned_ipa.sh \
+            "$DERIVED_DATA/Build/Products/Release-iphoneos/PocketKernel.app" \
+            "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
           Scripts/validate_ipa.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
           (cd "$OUTPUT_DIR" && shasum -a 256 PocketKernel-unsigned.ipa > SHA256SUMS.txt)
           Scripts/generate_build_report.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa" "$OUTPUT_DIR/BuildReport.md"
-      - name: Archive diagnostics
+
+      - name: Archive test diagnostics
         if: always()
+        shell: bash
         run: |
-          if [ -d "$RESULT_BUNDLE" ]; then ditto -c -k --sequesterRsrc --keepParent "$RESULT_BUNDLE" "$OUTPUT_DIR/TestResults.xcresult.zip"; fi
-      - name: Upload artifacts
+          set -euo pipefail
+          if [ -d "$RESULT_BUNDLE" ]; then
+            ditto -c -k --sequesterRsrc --keepParent "$RESULT_BUNDLE" "$OUTPUT_DIR/TestResults.xcresult.zip"
+          fi
+
+      - name: Upload build artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -103,9 +155,19 @@ jobs:
             build/build-settings.txt
           if-no-files-found: error
           retention-days: 90
-      - name: Publish release
-        if: success() && (github.event_name == 'push' || inputs.publish_release)
-        env: {GH_TOKEN: "${{ github.token }}"}
+
+      - name: Publish GitHub release
+        if: success() && github.event_name == 'workflow_dispatch' && inputs.publish_release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          tag="pocketkernel-build-${GITHUB_RUN_NUMBER}"
-          gh release create "$tag" "$OUTPUT_DIR/PocketKernel-unsigned.ipa" "$OUTPUT_DIR/SHA256SUMS.txt" "$OUTPUT_DIR/BuildReport.md" --target "$GITHUB_SHA" --title "PocketKernel Build ${GITHUB_RUN_NUMBER}" --notes-file "$OUTPUT_DIR/BuildReport.md"
+          set -euo pipefail
+          TAG="pocketkernel-build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" \
+            "$OUTPUT_DIR/PocketKernel-unsigned.ipa" \
+            "$OUTPUT_DIR/SHA256SUMS.txt" \
+            "$OUTPUT_DIR/BuildReport.md" \
+            --target "$GITHUB_SHA" \
+            --title "PocketKernel Build ${GITHUB_RUN_NUMBER}" \
+            --notes-file "$OUTPUT_DIR/BuildReport.md"
