@@ -1,15 +1,12 @@
 name: Build PocketKernel Unsigned IPA
 
 on:
-  push:
-    branches:
-      - pocketkernel-1.0-full-rebuild
   workflow_dispatch:
     inputs:
       publish_release:
         description: Publish the validated IPA as a GitHub release
         required: true
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -157,7 +154,7 @@ jobs:
           retention-days: 90
 
       - name: Publish GitHub release
-        if: success() && github.event_name == 'workflow_dispatch' && inputs.publish_release
+        if: success() && inputs.publish_release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
