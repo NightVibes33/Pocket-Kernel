@@ -50,9 +50,13 @@ enum ModelAvailabilityState: Sendable, Equatable {
     let intelligence: any IntelligenceServicing
     private let launchArguments: [String]
     private var didApplyLaunchReset = false
+    private var didApplyLaunchImport = false
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments) {
         launchArguments = arguments
+        if arguments.contains("-PKResetOnboarding") {
+            UserDefaults.standard.set(false, forKey: "PKOnboardingComplete")
+        }
         let storageLayout = AppEnvironment.makeLayout()
         lifecycle = AppLifecycleController(layout: storageLayout, arguments: arguments)
         do { store = try PocketStore(inMemory: arguments.contains("-PKInMemoryStore")) }
@@ -85,7 +89,16 @@ enum ModelAvailabilityState: Sendable, Equatable {
             if builtInTemplates.isEmpty { builtInTemplates = try TemplatePackageLibrary().load() }
             if launchArguments.contains("-PKResetDatabase"), !didApplyLaunchReset {
                 try await store.reset()
+                Self.clearAuxiliaryFiles()
                 didApplyLaunchReset = true
+            }
+            if launchArguments.contains("-PKReimportLastExport"), !didApplyLaunchImport {
+                let data = try Data(contentsOf: Self.lastExportURL())
+                let package = try PackageCodec().decode(data)
+                try await store.install(package)
+                try await store.log(appID: package.manifest.id, level: .info, category: "import", message: "Reimported the last exported Pocket App package.")
+                lastExportedPackage = data
+                didApplyLaunchImport = true
             }
             installed = try await store.installedApps()
             activity = try await store.activity()
@@ -183,12 +196,14 @@ enum ModelAvailabilityState: Sendable, Equatable {
         guard let store else { throw StoreError.invalidData }
         let data = try await store.exportPackage(appID: manifest.id)
         lastExportedPackage = data
+        try data.write(to: Self.lastExportURL(), options: .atomic)
         await load()
         return data
     }
 
     func importLastExportForTesting() async throws {
-        guard launchArguments.contains("-PKUITesting"), let data = lastExportedPackage else { throw StoreError.invalidData }
+        guard launchArguments.contains("-PKUITesting") else { throw StoreError.invalidData }
+        let data = try lastExportedPackage ?? Data(contentsOf: Self.lastExportURL())
         try await importPackage(data)
     }
 
@@ -243,6 +258,7 @@ enum ModelAvailabilityState: Sendable, Equatable {
         guard let store else { return }
         do {
             try await store.reset()
+            Self.clearAuxiliaryFiles()
             draft = nil
             previousDraft = nil
             lastExportedPackage = nil
@@ -267,6 +283,18 @@ enum ModelAvailabilityState: Sendable, Equatable {
     private static func argumentValue(_ key: String, arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: key), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]
+    }
+
+    private static func lastExportURL() -> URL {
+        makeLayout().exports.appending(path: "last-export.pocketapp")
+    }
+
+    private static func clearAuxiliaryFiles() {
+        let layout = makeLayout()
+        for directory in [layout.packages, layout.assets, layout.exports, layout.recovery] {
+            guard let contents = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { continue }
+            for url in contents { try? FileManager.default.removeItem(at: url) }
+        }
     }
 
     private static func makeLayout() -> PocketStorageLayout {
