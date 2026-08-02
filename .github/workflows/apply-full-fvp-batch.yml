@@ -1,0 +1,56 @@
+name: Apply Complete PocketKernel FVP Batch
+
+on:
+  push:
+    branches: [pocketkernel-1.0-full-rebuild]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+      - name: Replace staging tree atomically
+        shell: bash
+        env:
+          PAYLOAD_B64: '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'
+        run: |
+          set -euo pipefail
+          printf '%s' "$PAYLOAD_B64" | base64 --decode > /tmp/pocketkernel-fvp.tar.gz
+          tar -xzf /tmp/pocketkernel-fvp.tar.gz -C .
+          rm -rf \
+            .bootstrap \
+            .staging-tree-test \
+            .github/STAGING_FVP_BATCH_PLAN.md \
+            .github/STAGING_FVP_VERIFICATION.md \
+            .github/workflows/export-staging-source.yml \
+            .github/workflows/apply-full-fvp-batch.yml
+          chmod +x Scripts/*.sh Scripts/*.py
+          swiftformat PocketKernel PocketKernelTests PocketKernelUITests --config .swiftformat
+          Scripts/scan_source.sh
+          Scripts/validate_templates.py PocketKernel/Templates
+          swiftlint lint --strict --config .swiftlint.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Complete generic PocketKernel 1.0 FVP source and tests'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
+      - name: Dispatch full Xcode verification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sleep 3
+          gh workflow run build-unsigned.yml \
+            --repo NightVibes33/Pocket-Kernel \
+            --ref pocketkernel-1.0-full-rebuild \
+            -f publish_release=false
