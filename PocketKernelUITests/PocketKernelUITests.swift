@@ -70,11 +70,15 @@ import XCTest
 
         pressAndHold(generatedServiceLogButton(in: persisted))
         tap(persisted.buttons["Export"], timeout: 5)
-        dismissFileExporter(in: persisted)
 
-        swipeToDelete(generatedServiceLogButton(in: persisted), app: persisted)
-        waitForButtonCount(named: "Service Log", exactly: 1, in: persisted, timeout: 8)
+        // exportPackage writes the package before SwiftUI presents the system file exporter.
+        // Relaunching closes that system UI deterministically while preserving the real export.
         persisted.terminate()
+        let afterExport = launch(startTab: "library")
+        waitForButtonCount(named: "Service Log", minimum: 2, in: afterExport, timeout: 10)
+        swipeToDelete(generatedServiceLogButton(in: afterExport), app: afterExport)
+        waitForButtonCount(named: "Service Log", exactly: 1, in: afterExport, timeout: 8)
+        afterExport.terminate()
 
         let reimported = launch(startTab: "library", reimportLastExport: true)
         waitForButtonCount(named: "Service Log", minimum: 2, in: reimported, timeout: 12)
@@ -170,16 +174,6 @@ import XCTest
         if app.buttons["Continue Safely"].waitForExistence(timeout: 3) {
             tap(app.buttons["Continue Safely"])
         }
-    }
-
-    private func dismissFileExporter(in app: XCUIApplication) {
-        let cancel = app.buttons["Cancel"].firstMatch
-        if cancel.waitForExistence(timeout: 8) {
-            tap(cancel)
-            return
-        }
-        let navigationCancel = app.navigationBars.buttons["Cancel"].firstMatch
-        tap(navigationCancel, timeout: 5)
     }
 
     private func tap(_ element: XCUIElement, timeout: TimeInterval = 5) {
