@@ -200,21 +200,36 @@ private struct HomeView: View {
 
 private struct CreateView: View {
     @Environment(AppEnvironment.self) private var environment
-    @State private var prompt = "Create a car maintenance tracker with mileage, service date, cost, notes, and reminders for the next service."
+    @State private var prompt = ProcessInfo.processInfo.arguments.contains("-PKUITesting")
+    ? "Create a car maintenance tracker with mileage, service date, cost, notes, and reminders for the next service."
+    : ""
     @State private var selectedCapabilities: Set<PocketCapability> = []
     @State private var showingManualEditor = false
     private let suggestions = [
-        "Habit tracker with daily check-ins",
-        "Inventory manager with quantities and locations",
-        "Private journal with dated entries",
-        "Task board with status and due dates"
+        "Recipe organizer with ingredients, cook time, rating, and notes",
+        "Client CRM with company, contact, status, next follow-up date, and deal value",
+        "Workout log with exercise, sets, reps, weight, duration, and notes",
+        "Reading tracker with title, author, status, rating, finish date, and review",
+        "Trip planner with destination, dates, budget, bookings, and packing notes",
+        "Home inventory with item, room, quantity, value, purchase date, and photo"
     ]
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Describe your app") {
-                    TextEditor(text: $prompt).frame(minHeight: 120).accessibilityLabel("App description")
+                    ZStack(alignment: .topLeading) {
+                TextEditor(text: $prompt)
+                    .frame(minHeight: 150)
+                    .accessibilityLabel("App description")
+                if prompt.isEmpty {
+                    Text("Describe any local app: its purpose, records, fields, screens, and optional device capabilities.")
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+            }
                     ScrollView(.horizontal) {
                         HStack {
                             ForEach(suggestions, id: \.self) { suggestion in
@@ -237,7 +252,12 @@ private struct CreateView: View {
                 Section {
                     Button { Task { await environment.generate(prompt, capabilities: selectedCapabilities) } } label: {
                         if environment.isGenerating { Label("Generating and validating…", systemImage: "hourglass") }
-                        else { Label("Generate on Device", systemImage: "apple.intelligence") }
+                        else {
+                    Label(
+                        environment.modelState == .available ? "Generate on Device" : "Build Locally",
+                        systemImage: environment.modelState == .available ? "apple.intelligence" : "hammer.fill"
+                    )
+                }
                     }.disabled(environment.isGenerating || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Button("Open Manual Builder", systemImage: "slider.horizontal.3") { ensureManualDraft(); showingManualEditor = true }
                 }
@@ -266,7 +286,13 @@ private struct CreateView: View {
             }
         }
         Section("Generated Preview") {
-            Text("AI-generated blueprint—review before installing.").font(.caption).foregroundStyle(.secondary)
+            Text(
+                environment.modelState == .available
+                    ? "Generated privately on this device—review before installing."
+                    : "Compiled locally from your prompt—review and edit before installing."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
             NavigationLink("Open Full Preview") { RuntimeView(manifest: draft, previewOnly: true) }
             HStack {
                 Button("Undo", systemImage: "arrow.uturn.backward") { environment.undoDraft() }.disabled(environment.previousDraft == nil)
@@ -511,7 +537,7 @@ private struct LibraryView: View {
             do {
                 exportDocument = .init(data: try await environment.exportPackage(manifest))
                 exportFilename = manifest.name
-                exporting = true
+                exporting = !ProcessInfo.processInfo.arguments.contains("-PKUITesting")
             } catch { errorMessage = error.localizedDescription }
         }
     }
@@ -649,10 +675,22 @@ struct RuntimeView: View {
         return request.appName + " requests " + request.capability.displayName
     }
 
-    var body: some View {
-        List {
+    private var runtimeNavigationTitle: String {
+        if let collection = editingCollection { return "Add \(collection.title)" }
+        return screen?.title ?? manifest.name
+    }
+
+    @ViewBuilder private var runtimeListContent: some View {
+        if let collection = editingCollection {
+            ForEach(collection.fields) { field in fieldEditor(field) }
+        } else {
             if manifest.screens.count > 1 {
-                Picker("Screen", selection: $selectedScreenID) { ForEach(manifest.screens) { Text($0.title).tag($0.id) } }.pickerStyle(.segmented)
+                Picker("Screen", selection: $selectedScreenID) {
+                    ForEach(manifest.screens) { manifestScreen in
+                        Text(manifestScreen.title).tag(manifestScreen.id)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
             if let screen {
                 ForEach(screen.components) { component in
@@ -671,49 +709,56 @@ struct RuntimeView: View {
                 ContentUnavailableView("Invalid Screen", systemImage: "exclamationmark.triangle", description: Text("The entry screen is missing."))
             }
         }
-        .navigationTitle(screen?.title ?? manifest.name)
-        .toolbar {
-            if !previewOnly {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { undoLast() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
-                        .disabled(!canUndo)
-                    Button("Done") { environment.lifecycle.markRuntimeClosed(); dismiss() }
+    }
+
+    var body: some View {
+        List { runtimeListContent }
+            .navigationTitle(runtimeNavigationTitle)
+            .toolbar {
+                if let collection = editingCollection {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { editingCollection = nil }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            if let action = manifest.actions.first(where: { $0.kind == .createRecord && $0.target == collection.id }) {
+                                editingCollection = nil
+                                execute(action.id, form: formValues)
+                            }
+                        }
+                    }
+                } else if !previewOnly {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button { undoLast() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                            .disabled(!canUndo)
+                        Button("Done") { environment.lifecycle.markRuntimeClosed(); dismiss() }
+                    }
                 }
             }
-        }
-        .task { await startRuntime() }
-        .onDisappear { if !previewOnly { environment.lifecycle.markRuntimeClosed() } }
-        .onChange(of: runtimeValues) { _, values in persist(values) }
-        .overlay {
-            if let collection = editingCollection {
-                recordForm(collection)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.background)
-                    .ignoresSafeArea()
-                    .zIndex(10)
+            .task { await startRuntime() }
+            .onDisappear { if !previewOnly { environment.lifecycle.markRuntimeClosed() } }
+            .onChange(of: runtimeValues) { _, values in persist(values) }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in importRuntimeFile(result) }
+            .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .pocketApp, defaultFilename: manifest.name) { result in
+                if case .failure(let error) = result { runtimeError = error.localizedDescription }
             }
-        }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in importRuntimeFile(result) }
-        .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .pocketApp, defaultFilename: manifest.name) { result in
-            if case .failure(let error) = result { runtimeError = error.localizedDescription }
-        }
-        .photosPicker(isPresented: $selectingActionPhoto, selection: $actionPhotoItem, matching: .images)
-        .task(id: actionPhotoItem) { await loadActionPhoto() }
-        .sheet(isPresented: Binding(get: { sharingText != nil }, set: { if !$0 { sharingText = nil } })) {
-            ShareLink(item: sharingText ?? "") { Label("Share", systemImage: "square.and.arrow.up") }.padding()
-        }
-        .alert("Pocket App", isPresented: Binding(get: { runtimeAlert != nil }, set: { if !$0 { runtimeAlert = nil } })) {
-            Button("OK") {}
-        } message: { Text(runtimeAlert ?? "") }
-        .alert("Runtime Error", isPresented: Binding(get: { runtimeError != nil }, set: { if !$0 { runtimeError = nil } })) {
-            Button("Retry") { if let pendingActionID { runAction(pendingActionID) } }
-            Button("Dismiss", role: .cancel) {}
-        } message: { Text(runtimeError ?? "") }
-        .confirmationDialog(
-            permissionDialogTitle,
-            isPresented: Binding(get: { permissionRequest != nil }, set: { if !$0 { permissionRequest = nil } }),
-            titleVisibility: .visible
-        ) { permissionButtons } message: { Text(permissionRequest?.reason ?? "") }
+            .photosPicker(isPresented: $selectingActionPhoto, selection: $actionPhotoItem, matching: .images)
+            .task(id: actionPhotoItem) { await loadActionPhoto() }
+            .sheet(isPresented: Binding(get: { sharingText != nil }, set: { if !$0 { sharingText = nil } })) {
+                ShareLink(item: sharingText ?? "") { Label("Share", systemImage: "square.and.arrow.up") }.padding()
+            }
+            .alert("Pocket App", isPresented: Binding(get: { runtimeAlert != nil }, set: { if !$0 { runtimeAlert = nil } })) {
+                Button("OK") {}
+            } message: { Text(runtimeAlert ?? "") }
+            .alert("Runtime Error", isPresented: Binding(get: { runtimeError != nil }, set: { if !$0 { runtimeError = nil } })) {
+                Button("Retry") { if let pendingActionID { runAction(pendingActionID) } }
+                Button("Dismiss", role: .cancel) {}
+            } message: { Text(runtimeError ?? "") }
+            .confirmationDialog(
+                permissionDialogTitle,
+                isPresented: Binding(get: { permissionRequest != nil }, set: { if !$0 { permissionRequest = nil } }),
+                titleVisibility: .visible
+            ) { permissionButtons } message: { Text(permissionRequest?.reason ?? "") }
     }
 
     @ViewBuilder private var permissionButtons: some View {
@@ -871,26 +916,6 @@ struct RuntimeView: View {
                 permissionRequest = nil
                 if decision != .denied { execute(actionID, form: [:]) }
             } catch { runtimeError = error.localizedDescription }
-        }
-    }
-
-    private func recordForm(_ collection: CollectionSpec) -> some View {
-        NavigationStack {
-            Form { ForEach(collection.fields) { field in fieldEditor(field) } }
-                .navigationTitle("Add \(collection.title)")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { editingCollection = nil }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            if let action = manifest.actions.first(where: { $0.kind == .createRecord && $0.target == collection.id }) {
-                                editingCollection = nil
-                                execute(action.id, form: formValues)
-                            }
-                        }
-                    }
-                }
         }
     }
 

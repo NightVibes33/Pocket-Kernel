@@ -371,7 +371,7 @@ enum ModelAvailabilityState: Sendable, Equatable {
     }
 }
 
-private struct PromptBlueprintGenerator: BlueprintGenerating {
+struct PromptBlueprintGenerator: BlueprintGenerating {
     func generateBlueprint(from request: String, context: BuilderContext) async throws -> MicroAppBlueprint {
         compile(request: request, capabilities: context.requestedCapabilities)
     }

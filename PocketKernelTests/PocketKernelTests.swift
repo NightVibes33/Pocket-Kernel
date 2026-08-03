@@ -511,3 +511,52 @@ private extension XCTestCase {
         }
     }
 }
+
+
+final class PromptBlueprintGeneratorTests: XCTestCase {
+    func testPromptCompilerProducesDifferentValidatedApps() async throws {
+        let generator = PromptBlueprintGenerator()
+        let context = BuilderContext(localeIdentifier: "en_US", requestedCapabilities: [.localNotifications, .fileExport])
+        let recipe = try await generator.generateBlueprint(
+            from: "Create a recipe organizer with recipe name, ingredients, cook time, rating, and notes",
+            context: context
+        )
+        let clients = try await generator.generateBlueprint(
+            from: "Create a client CRM with company, contact name, status, deal value, and next follow-up date",
+            context: context
+        )
+        let workouts = try await generator.generateBlueprint(
+            from: "Create a workout log with exercise, sets, reps, weight, duration, and notes",
+            context: context
+        )
+
+        XCTAssertEqual(Set([recipe.name, clients.name, workouts.name]).count, 3)
+        XCTAssertNotEqual(recipe.collections.first?.fields.map(\.id), clients.collections.first?.fields.map(\.id))
+        XCTAssertNotEqual(clients.collections.first?.fields.map(\.id), workouts.collections.first?.fields.map(\.id))
+
+        for blueprint in [recipe, clients, workouts] {
+            let manifest = BlueprintConverter().convert(blueprint, capabilities: context.requestedCapabilities)
+            let errors = ManifestValidator().validate(manifest).filter { $0.severity == .error }
+            XCTAssertTrue(errors.isEmpty, "\(blueprint.name): \(errors.map(\.message))")
+            XCTAssertGreaterThanOrEqual(manifest.screens.count, 2)
+            XCTAssertFalse(manifest.collections.flatMap(\.fields).isEmpty)
+            XCTAssertTrue(manifest.actions.contains { $0.kind == .createRecord })
+        }
+    }
+
+    func testPromptCompilerInfersFieldTypesAndCapabilities() async throws {
+        let generator = PromptBlueprintGenerator()
+        let blueprint = try await generator.generateBlueprint(
+            from: "Build a subscription tracker with service name, monthly cost, renewal date, active status, category, and notes; remind me before renewal and export backups",
+            context: .init(localeIdentifier: "en_US", requestedCapabilities: [.localNotifications, .fileExport])
+        )
+        let fields = try XCTUnwrap(blueprint.collections.first).fields
+        XCTAssertTrue(fields.contains { $0.kind == .number })
+        XCTAssertTrue(fields.contains { $0.kind == .date })
+        XCTAssertTrue(fields.contains { $0.kind == .boolean })
+        XCTAssertTrue(fields.contains { $0.kind == .choice })
+        XCTAssertTrue(fields.contains { $0.kind == .multilineText })
+        XCTAssertTrue(blueprint.actions.contains { $0.kind == .scheduleLocalNotification })
+        XCTAssertTrue(blueprint.actions.contains { $0.kind == .exportFile })
+    }
+}
