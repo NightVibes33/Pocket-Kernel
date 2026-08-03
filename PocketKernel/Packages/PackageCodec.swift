@@ -45,7 +45,7 @@ struct PackageCodec: Sendable {
         do { canonicalManifest = try canonicalManifestJSON(in: data) }
         catch { throw PackageError.malformed }
 
-        let package: PocketPackage
+        var package: PocketPackage
         do { package = try makeDecoder().decode(PocketPackage.self, from: data) }
         catch { throw PackageError.malformed }
 
@@ -76,6 +76,8 @@ struct PackageCodec: Sendable {
 
         let issues = ManifestValidator().validate(package.manifest).filter { $0.severity == .error }
         guard issues.isEmpty else { throw PackageError.invalidManifest(issues) }
+
+        package.integrity = try integrity(for: package.manifest)
         return package
     }
 
