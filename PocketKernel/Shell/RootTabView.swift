@@ -456,14 +456,7 @@ private struct LibraryView: View {
                 }
                 Section("Built-in Pocket Apps") {
                     ForEach(environment.builtInTemplates) { template in
-                        Button {
-                            Task {
-                                await environment.installTemplate(template)
-                                if let app = environment.installed.first(where: { $0.id == template.id }) {
-                                    await environment.open(app)
-                                }
-                            }
-                        } label: {
+                        Button { Task { await environment.installTemplate(template) } } label: {
                             Label {
                                 VStack(alignment: .leading) {
                                     Text(template.manifest.name)
@@ -691,8 +684,14 @@ struct RuntimeView: View {
         .task { await startRuntime() }
         .onDisappear { if !previewOnly { environment.lifecycle.markRuntimeClosed() } }
         .onChange(of: runtimeValues) { _, values in persist(values) }
-        .fullScreenCover(item: $editingCollection) { collection in
-            recordForm(collection)
+        .overlay {
+            if let collection = editingCollection {
+                recordForm(collection)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.background)
+                    .ignoresSafeArea()
+                    .zIndex(10)
+            }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in importRuntimeFile(result) }
         .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .pocketApp, defaultFilename: manifest.name) { result in
