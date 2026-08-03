@@ -22,14 +22,12 @@ import XCTest
         ]
 
         for name in ["Task Board", "Habit Tracker", "Quick Journal", "Inventory List", "Service Log"] {
-            let before = pocketAppButtons(named: name, in: app).count
             let installButton = lastPocketAppButton(named: name, in: app)
             scrollToElement(installButton, app: app, timeout: 10)
             tap(installButton, timeout: 10)
-            waitForButtonCount(named: name, minimum: before + 1, in: app, timeout: 10)
 
-            let installedButton = pocketAppButtons(named: name, in: app).firstMatch
-            scrollToElement(installedButton, app: app, timeout: 10, direction: .down)
+            let installedButton = installedPocketAppButton(named: name, in: app)
+            scrollToElement(installedButton, app: app, timeout: 12, direction: .down)
             tap(installedButton, timeout: 8)
             XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 8), name)
             tap(app.buttons["Done"], timeout: 5)
@@ -123,6 +121,12 @@ import XCTest
 
     private func pocketAppButtons(named name: String, in app: XCUIApplication) -> XCUIElementQuery {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", name))
+    }
+
+    private func installedPocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH[c] %@ AND label CONTAINS[c] %@", name, "v1 •")
+        ).firstMatch
     }
 
     private func lastPocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
