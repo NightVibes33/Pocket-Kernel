@@ -10,4 +10,4 @@ The shipped built-in apps are real validated `.pocketapp` resources with screens
 
 The generated blueprint preserves typed component trees, field options/defaults, action conditions/parameters/chaining, and exact network domains instead of forcing every request into a preset tracker layout.
 
-The final verification applies the record editor in-tree, waits for the runtime to actually open, runs all tests, builds ARM64 iphoneos, validates the unsigned IPA, and only then persists the tested source.
+The current candidate makes runtime presentation the final observable state change and renders record fields directly inside the existing runtime list and toolbar before building and validating the unsigned ARM64 IPA.
