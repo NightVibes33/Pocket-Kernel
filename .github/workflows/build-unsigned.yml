@@ -39,6 +39,141 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Use direct runtime form architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("PocketKernel/Shell/RootTabView.swift")
+          source = path.read_text()
+          old_body = '''    var body: some View {
+              List {
+                  if manifest.screens.count > 1 {
+                      Picker("Screen", selection: $selectedScreenID) { ForEach(manifest.screens) { Text($0.title).tag($0.id) } }.pickerStyle(.segmented)
+                  }
+                  if let screen {
+                      ForEach(screen.components) { component in
+                          ComponentRenderer(
+                              component: component,
+                              recordsByCollection: recordsByCollection,
+                              collectionSpecs: collectionSpecs,
+                              assetData: assetData,
+                              runtimeValues: $runtimeValues,
+                              runAction: runAction,
+                              importFile: { importing = true },
+                              exportFile: prepareExport
+                          )
+                      }
+                  } else {
+                      ContentUnavailableView("Invalid Screen", systemImage: "exclamationmark.triangle", description: Text("The entry screen is missing."))
+                  }
+              }
+              .navigationTitle(screen?.title ?? manifest.name)
+              .toolbar {
+                  if !previewOnly {
+                      ToolbarItemGroup(placement: .topBarTrailing) {
+                          Button { undoLast() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                              .disabled(!canUndo)
+                          Button("Done") { environment.lifecycle.markRuntimeClosed(); dismiss() }
+                      }
+                  }
+              }
+          '''
+          new_body = '''    var body: some View {
+              List {
+                  if let collection = editingCollection {
+                      ForEach(collection.fields) { field in fieldEditor(field) }
+                  } else {
+                      if manifest.screens.count > 1 {
+                          Picker("Screen", selection: $selectedScreenID) { ForEach(manifest.screens) { Text($0.title).tag($0.id) } }.pickerStyle(.segmented)
+                      }
+                      if let screen {
+                          ForEach(screen.components) { component in
+                              ComponentRenderer(
+                                  component: component,
+                                  recordsByCollection: recordsByCollection,
+                                  collectionSpecs: collectionSpecs,
+                                  assetData: assetData,
+                                  runtimeValues: $runtimeValues,
+                                  runAction: runAction,
+                                  importFile: { importing = true },
+                                  exportFile: prepareExport
+                              )
+                          }
+                      } else {
+                          ContentUnavailableView("Invalid Screen", systemImage: "exclamationmark.triangle", description: Text("The entry screen is missing."))
+                      }
+                  }
+              }
+              .navigationTitle(editingCollection.map { "Add \\($0.title)" } ?? (screen?.title ?? manifest.name))
+              .toolbar {
+                  if let collection = editingCollection {
+                      ToolbarItem(placement: .cancellationAction) {
+                          Button("Cancel") { editingCollection = nil }
+                      }
+                      ToolbarItem(placement: .confirmationAction) {
+                          Button("Save") {
+                              if let action = manifest.actions.first(where: { $0.kind == .createRecord && $0.target == collection.id }) {
+                                  editingCollection = nil
+                                  execute(action.id, form: formValues)
+                              }
+                          }
+                      }
+                  } else if !previewOnly {
+                      ToolbarItemGroup(placement: .topBarTrailing) {
+                          Button { undoLast() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
+                              .disabled(!canUndo)
+                          Button("Done") { environment.lifecycle.markRuntimeClosed(); dismiss() }
+                      }
+                  }
+              }
+          '''
+          if old_body not in source:
+              raise SystemExit("Runtime body block not found")
+          source = source.replace(old_body, new_body, 1)
+
+          overlay = '''        .overlay {
+              if let collection = editingCollection {
+                  recordForm(collection)
+                      .frame(maxWidth: .infinity, maxHeight: .infinity)
+                      .background(.background)
+                      .ignoresSafeArea()
+                      .zIndex(10)
+              }
+          }
+'''
+          if overlay not in source:
+              raise SystemExit("Runtime overlay block not found")
+          source = source.replace(overlay, "", 1)
+
+          record_form = '''    private func recordForm(_ collection: CollectionSpec) -> some View {
+              NavigationStack {
+                  Form { ForEach(collection.fields) { field in fieldEditor(field) } }
+                      .navigationTitle("Add \\(collection.title)")
+                      .toolbar {
+                          ToolbarItem(placement: .cancellationAction) {
+                              Button("Cancel") { editingCollection = nil }
+                          }
+                          ToolbarItem(placement: .confirmationAction) {
+                              Button("Save") {
+                                  if let action = manifest.actions.first(where: { $0.kind == .createRecord && $0.target == collection.id }) {
+                                      editingCollection = nil
+                                      execute(action.id, form: formValues)
+                                  }
+                              }
+                          }
+                      }
+              }
+          }
+
+'''
+          if record_form not in source:
+              raise SystemExit("Nested recordForm helper not found")
+          path.write_text(source.replace(record_form, "", 1))
+          PY
+
       - name: Verify runner and Xcode
         shell: bash
         run: |
