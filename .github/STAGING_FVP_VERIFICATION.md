@@ -10,4 +10,4 @@ The shipped built-in apps are real validated `.pocketapp` resources with screens
 
 The generated blueprint preserves typed component trees, field options/defaults, action conditions/parameters/chaining, and exact network domains instead of forcing every request into a preset tracker layout.
 
-The runtime undo, verified-package integrity rebasing, valid-record limits, lazy-list UI selection, and stable record-form presentation changes are committed. This source state is the current clean verification candidate.
+The runtime undo, deterministic capability hashing, valid-record limits, lazy-list UI selection, and full-screen record-form presentation changes are the current final verification candidate.
