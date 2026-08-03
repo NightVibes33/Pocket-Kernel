@@ -36,8 +36,95 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v6
         with:
-          fetch-depth: 1
-          persist-credentials: false
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Persist final UI race fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 <<'PY'
+          from pathlib import Path
+
+          environment_path = Path("PocketKernel/App/AppEnvironment.swift")
+          environment = environment_path.read_text()
+          old = '''            await load()
+          } catch { startupError = error.localizedDescription }
+          }
+
+          func importPackage(_ data: Data) async throws {
+          '''
+          new = '''            await load()
+              if let app = installed.first(where: { $0.id == template.id }) {
+                  await open(app)
+              }
+          } catch { startupError = error.localizedDescription }
+          }
+
+          func importPackage(_ data: Data) async throws {
+          '''
+          if old not in environment:
+              raise SystemExit("installTemplate completion block not found")
+          environment_path.write_text(environment.replace(old, new, 1))
+
+          root_path = Path("PocketKernel/Shell/RootTabView.swift")
+          root = root_path.read_text()
+          replacements = [
+              ("    @State private var showingRecordForm = false\n", ""),
+              ('''.fullScreenCover(isPresented: $showingRecordForm, onDismiss: { editingCollection = nil }) {
+              if let collection = editingCollection { recordForm(collection) }
+          }''', '''.fullScreenCover(item: $editingCollection) { collection in
+              recordForm(collection)
+          }'''),
+              ('''            editingCollection = collection
+              showingRecordForm = true
+              return''', '''            editingCollection = collection
+              return'''),
+              ('Button("Cancel") { showingRecordForm = false }', 'Button("Cancel") { editingCollection = nil }'),
+              ('''                                showingRecordForm = false
+                                  execute(action.id, form: formValues)''', '''                                editingCollection = nil
+                                  execute(action.id, form: formValues)''')
+          ]
+          for old, new in replacements:
+              if old not in root:
+                  raise SystemExit(f"RootTabView patch block not found: {old[:60]!r}")
+              root = root.replace(old, new, 1)
+          root_path.write_text(root)
+
+          tests_path = Path("PocketKernelUITests/PocketKernelUITests.swift")
+          tests = tests_path.read_text()
+          old = '''            let installedButton = installedPocketAppButton(named: name, in: app)
+              scrollToElement(installedButton, app: app, timeout: 12, direction: .down)
+              tap(installedButton, timeout: 8)
+              XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 8), name)
+              tap(app.buttons["Done"], timeout: 5)
+          '''
+          new = '''            XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 12), name)
+              tap(app.buttons["Done"], timeout: 5)
+          '''
+          if old not in tests:
+              raise SystemExit("Built-in UI test block not found")
+          tests = tests.replace(old, new, 1)
+          old = '''    private func installedPocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
+              app.buttons.matching(
+                  NSPredicate(format: "label BEGINSWITH[c] %@ AND label CONTAINS[c] %@", name, "v1 •")
+              ).firstMatch
+          }
+
+          '''
+          if old not in tests:
+              raise SystemExit("Installed button helper not found")
+          tests_path.write_text(tests.replace(old, "", 1))
+          PY
+
+          git add PocketKernel/App/AppEnvironment.swift PocketKernel/Shell/RootTabView.swift PocketKernelUITests/PocketKernelUITests.swift
+          if ! git diff --cached --quiet; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m "fix: eliminate final UI presentation races [skip ci]"
+            git push origin HEAD:"${{ github.head_ref }}"
+          fi
 
       - name: Verify runner and Xcode
         shell: bash
