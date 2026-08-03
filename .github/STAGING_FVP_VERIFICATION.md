@@ -10,4 +10,4 @@ The shipped built-in apps are real validated `.pocketapp` resources with screens
 
 The generated blueprint preserves typed component trees, field options/defaults, action conditions/parameters/chaining, and exact network domains instead of forcing every request into a preset tracker layout.
 
-The runtime undo and canonical package-integrity changes are committed. Apply the nested-component chart assertion directly, remove its one-time helper, then run the stable verification pipeline.
+The runtime undo, verified-package integrity rebasing, valid-record limits, lazy-list UI selection, and stable record-form presentation changes are committed. This source state is the current clean verification candidate.
