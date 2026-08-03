@@ -181,13 +181,14 @@ import XCTest
         direction: ScrollDirection = .up
     ) {
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.isHittable && Date() < deadline {
+        while Date() < deadline {
+            if element.waitForExistence(timeout: 0.5), element.isHittable { return }
             switch direction {
             case .up: app.swipeUp()
             case .down: app.swipeDown()
             }
         }
-        XCTAssertTrue(element.isHittable)
+        XCTAssertTrue(element.exists && element.isHittable)
     }
 
     private func pressAndHold(_ element: XCUIElement) {
