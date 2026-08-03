@@ -206,10 +206,11 @@ enum ModelAvailabilityState: Sendable, Equatable {
         do {
             try await store.install(template.package)
             try await store.log(appID: template.id, level: .info, category: "install", message: "Installed built-in package \(template.manifest.name).")
+            try await store.markOpened(id: template.id)
+            try await store.log(appID: template.id, level: .info, category: "runtime", message: "Opened \(template.manifest.name).")
             await load()
-            if let app = installed.first(where: { $0.id == template.id }) {
-                await open(app)
-            }
+            pendingOpenApp = template.manifest
+            lifecycle.markRuntimeOpen(appID: template.id)
         } catch { startupError = error.localizedDescription }
     }
 
@@ -241,9 +242,9 @@ enum ModelAvailabilityState: Sendable, Equatable {
         do {
             try await store.markOpened(id: app.id)
             try await store.log(appID: app.id, level: .info, category: "runtime", message: "Opened \(app.manifest.name).")
+            await load()
             pendingOpenApp = app.manifest
             lifecycle.markRuntimeOpen(appID: app.id)
-            await load()
         } catch { startupError = error.localizedDescription }
     }
 
