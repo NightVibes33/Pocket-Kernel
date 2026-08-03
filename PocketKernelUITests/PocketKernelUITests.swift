@@ -54,7 +54,7 @@ import XCTest
         tap(app.buttons["Save"], timeout: 5)
         tap(app.buttons["Service History"], timeout: 8)
 
-        let committedRecord = app.descendants(matching: .any)["record-field-serviceType"]
+        let committedRecord = serviceTypeRecord(in: app)
         XCTAssertTrue(committedRecord.waitForExistence(timeout: 15))
         XCTAssertTrue(committedRecord.label.localizedCaseInsensitiveContains("Oil Change"))
 
@@ -63,7 +63,7 @@ import XCTest
         dismissRecoveryIfNeeded(persisted)
         tap(generatedServiceLogButton(in: persisted), timeout: 10)
         tap(persisted.buttons["Service History"], timeout: 8)
-        let record = persisted.descendants(matching: .any)["record-field-serviceType"]
+        let record = serviceTypeRecord(in: persisted)
         XCTAssertTrue(record.waitForExistence(timeout: 10))
         XCTAssertTrue(record.label.localizedCaseInsensitiveContains("Oil Change"))
         tap(persisted.buttons["Done"], timeout: 5)
@@ -132,6 +132,14 @@ import XCTest
             format: "label BEGINSWITH[c] %@ AND label CONTAINS[c] %@",
             "Service Log",
             "Track vehicle maintenance, mileage, cost, and notes."
+        )).firstMatch
+    }
+
+    private func serviceTypeRecord(in app: XCUIApplication) -> XCUIElement {
+        app.staticTexts.matching(NSPredicate(
+            format: "identifier == %@ AND label CONTAINS[c] %@",
+            "component-history-list",
+            "Oil Change"
         )).firstMatch
     }
 
