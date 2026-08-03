@@ -21,7 +21,7 @@ import XCTest
             "Service Log": "Service Log"
         ]
 
-        for name in ["Task Board", "Habit Tracker", "Quick Journal", "Inventory List", "Service Log"] {
+        for name in ["Habit Tracker", "Inventory List", "Quick Journal", "Service Log", "Task Board"] {
             let installButton = lastPocketAppButton(named: name, in: app)
             scrollToElement(installButton, app: app, timeout: 10)
             tap(installButton, timeout: 10)
@@ -45,7 +45,7 @@ import XCTest
 
         tap(app.tabBars.buttons["Library"], timeout: 5)
         waitForButtonCount(named: "Service Log", minimum: 2, in: app, timeout: 10)
-        tap(pocketAppButtons(named: "Service Log", in: app).firstMatch, timeout: 10)
+        tap(generatedServiceLogButton(in: app), timeout: 10)
 
         tap(app.buttons["Add Service"], timeout: 8)
         let service = app.textFields["Service"]
@@ -56,31 +56,31 @@ import XCTest
         app.terminate()
         let persisted = launch(startTab: "library")
         dismissRecoveryIfNeeded(persisted)
-        tap(pocketAppButtons(named: "Service Log", in: persisted).firstMatch, timeout: 10)
+        tap(generatedServiceLogButton(in: persisted), timeout: 10)
         let record = persisted.descendants(matching: .any)["record-field-serviceType"]
         XCTAssertTrue(record.waitForExistence(timeout: 10))
         XCTAssertTrue(record.label.localizedCaseInsensitiveContains("Oil Change"))
         tap(persisted.buttons["Done"], timeout: 5)
 
-        pressAndHold(pocketAppButtons(named: "Service Log", in: persisted).firstMatch)
+        pressAndHold(generatedServiceLogButton(in: persisted))
         tap(persisted.buttons["Export"], timeout: 5)
         dismissFileExporter(in: persisted)
 
-        pressAndHold(pocketAppButtons(named: "Service Log", in: persisted).firstMatch)
+        pressAndHold(generatedServiceLogButton(in: persisted))
         tap(persisted.buttons["Delete"], timeout: 5)
         waitForButtonCount(named: "Service Log", exactly: 1, in: persisted, timeout: 8)
         persisted.terminate()
 
         let reimported = launch(startTab: "library", reimportLastExport: true)
         waitForButtonCount(named: "Service Log", minimum: 2, in: reimported, timeout: 12)
-        tap(pocketAppButtons(named: "Service Log", in: reimported).firstMatch, timeout: 10)
+        tap(generatedServiceLogButton(in: reimported), timeout: 10)
         XCTAssertTrue(reimported.staticTexts["Service Log"].firstMatch.waitForExistence(timeout: 8))
         tap(reimported.buttons["Done"], timeout: 5)
         reimported.terminate()
 
         let relaunched = launch(startTab: "library")
         waitForButtonCount(named: "Service Log", minimum: 2, in: relaunched, timeout: 10)
-        tap(pocketAppButtons(named: "Service Log", in: relaunched).firstMatch, timeout: 10)
+        tap(generatedServiceLogButton(in: relaunched), timeout: 10)
         XCTAssertTrue(relaunched.staticTexts["Service Log"].firstMatch.waitForExistence(timeout: 8))
         tap(relaunched.buttons["Done"], timeout: 5)
     }
@@ -119,6 +119,14 @@ import XCTest
 
     private func pocketAppButtons(named name: String, in app: XCUIApplication) -> XCUIElementQuery {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", name))
+    }
+
+    private func generatedServiceLogButton(in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH[c] %@ AND label CONTAINS[c] %@",
+            "Service Log",
+            "Track vehicle maintenance, mileage, cost, and notes."
+        )).firstMatch
     }
 
     private func lastPocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
@@ -163,7 +171,8 @@ import XCTest
 
     private func tap(_ element: XCUIElement, timeout: TimeInterval = 5) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "Missing element: \(element)")
-        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(element.isHittable, "Element is not hittable: \(element)")
+        element.tap()
     }
 
     private func scrollToElement(
@@ -173,11 +182,29 @@ import XCTest
         direction: ScrollDirection = .up
     ) {
         let deadline = Date().addingTimeInterval(timeout)
+        let windowFrame = app.windows.firstMatch.frame
+        let topLimit = windowFrame.minY + 100
+        let bottomLimit = windowFrame.maxY - 150
+
         while Date() < deadline {
-            if element.waitForExistence(timeout: 0.5), element.isHittable { return }
-            switch direction {
-            case .up: app.swipeUp()
-            case .down: app.swipeDown()
+            if element.waitForExistence(timeout: 0.5) {
+                let middle = element.frame.midY
+                if element.isHittable, middle >= topLimit, middle <= bottomLimit { return }
+                if middle > bottomLimit {
+                    app.swipeUp()
+                } else if middle < topLimit {
+                    app.swipeDown()
+                } else {
+                    switch direction {
+                    case .up: app.swipeUp()
+                    case .down: app.swipeDown()
+                    }
+                }
+            } else {
+                switch direction {
+                case .up: app.swipeUp()
+                case .down: app.swipeDown()
+                }
             }
         }
         XCTAssertTrue(element.exists && element.isHittable)
@@ -185,6 +212,7 @@ import XCTest
 
     private func pressAndHold(_ element: XCUIElement) {
         XCTAssertTrue(element.waitForExistence(timeout: 8))
-        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 1.2)
+        XCTAssertTrue(element.isHittable)
+        element.press(forDuration: 1.2)
     }
 }
