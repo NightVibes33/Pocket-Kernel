@@ -1,0 +1,116 @@
+name: Apply Green Build Fixes
+
+on:
+  push:
+    branches:
+      - pocketkernel-1.0-full-rebuild
+    paths:
+      - .github/workflows/zz-apply-green-build-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+
+      - name: Apply deterministic package and runtime fixes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          codec_path = Path("PocketKernel/Packages/PackageCodec.swift")
+          codec = codec_path.read_text()
+          old = '''    func integrity(for manifest: MicroAppManifest) throws -> PackageIntegrity {
+              let encoded = try makeEncoder().encode(manifest)
+              return .init(manifestHash: sha256(try canonicalJSON(encoded)))
+          }
+'''
+          new = '''    func integrity(for manifest: MicroAppManifest) throws -> PackageIntegrity {
+              let encoded = try makeEncoder().encode(manifest)
+              let object = try JSONSerialization.jsonObject(with: encoded)
+              return .init(manifestHash: sha256(try canonicalManifestJSON(object)))
+          }
+'''
+          if old not in codec:
+              raise SystemExit("PackageCodec integrity block not found")
+          codec = codec.replace(old, new, 1)
+
+          old = '''    private func canonicalManifestJSON(in packageData: Data) throws -> Data {
+              guard let package = try JSONSerialization.jsonObject(with: packageData) as? [String: Any],
+                    let manifest = package["manifest"]
+              else { throw PackageError.malformed }
+              return try canonicalJSON(manifest)
+          }
+'''
+          new = '''    private func canonicalManifestJSON(in packageData: Data) throws -> Data {
+              guard let package = try JSONSerialization.jsonObject(with: packageData) as? [String: Any],
+                    let manifest = package["manifest"]
+              else { throw PackageError.malformed }
+              return try canonicalManifestJSON(manifest)
+          }
+
+          private func canonicalManifestJSON(_ object: Any) throws -> Data {
+              guard var manifest = object as? [String: Any] else { throw PackageError.malformed }
+              if let values = manifest["capabilities"] as? [Any] {
+                  let capabilities = try values.map { value -> String in
+                      guard let capability = value as? String else { throw PackageError.malformed }
+                      return capability
+                  }
+                  manifest["capabilities"] = capabilities.sorted()
+              }
+              return try canonicalJSON(manifest)
+          }
+'''
+          if old not in codec:
+              raise SystemExit("PackageCodec canonical manifest block not found")
+          codec_path.write_text(codec.replace(old, new, 1))
+
+          root_path = Path("PocketKernel/Shell/RootTabView.swift")
+          root = root_path.read_text()
+          old = '.sheet(isPresented: $showingRecordForm, onDismiss: { editingCollection = nil }) {'
+          new = '.fullScreenCover(isPresented: $showingRecordForm, onDismiss: { editingCollection = nil }) {'
+          if root.count(old) != 1:
+              raise SystemExit(f"Expected one record-form sheet, found {root.count(old)}")
+          root_path.write_text(root.replace(old, new, 1))
+
+          tests_path = Path("PocketKernelUITests/PocketKernelUITests.swift")
+          tests = tests_path.read_text()
+          old = '''        let deadline = Date().addingTimeInterval(timeout)
+          while !element.isHittable && Date() < deadline {
+              switch direction {
+              case .up: app.swipeUp()
+              case .down: app.swipeDown()
+              }
+          }
+          XCTAssertTrue(element.isHittable)
+'''
+          new = '''        let deadline = Date().addingTimeInterval(timeout)
+          while Date() < deadline {
+              if element.waitForExistence(timeout: 0.5), element.isHittable { return }
+              switch direction {
+              case .up: app.swipeUp()
+              case .down: app.swipeDown()
+              }
+          }
+          XCTAssertTrue(element.exists && element.isHittable)
+'''
+          if old not in tests:
+              raise SystemExit("UI scroll helper block not found")
+          tests_path.write_text(tests.replace(old, new, 1))
+
+      - name: Commit patch and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/zz-apply-green-build-fixes.yml
+          git add PocketKernel/Packages/PackageCodec.swift PocketKernel/Shell/RootTabView.swift PocketKernelUITests/PocketKernelUITests.swift
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "fix: stabilize packages and runtime forms [skip ci]"
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
