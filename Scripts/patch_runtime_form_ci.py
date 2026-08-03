@@ -101,6 +101,14 @@ if record_start != -1:
     field_editor = source.index("    @ViewBuilder private func fieldEditor", record_start)
     source = source[:record_start] + source[field_editor:]
 
+library_export = '''                exportFilename = manifest.name
+                exporting = true'''
+library_export_for_testing = '''                exportFilename = manifest.name
+                exporting = !ProcessInfo.processInfo.arguments.contains("-PKUITesting")'''
+if library_export not in source:
+    raise SystemExit("Library export state assignment was not found")
+source = source.replace(library_export, library_export_for_testing, 1)
+
 runtime_source = source[runtime_start:]
 if ".overlay {" in runtime_source:
     raise SystemExit("Runtime overlay remained after patch")
@@ -108,5 +116,7 @@ if ".fullScreenCover(item: $editingCollection)" in runtime_source:
     raise SystemExit("Nested record-form cover remained after patch")
 if "private func recordForm(" in runtime_source:
     raise SystemExit("Nested recordForm helper remained after patch")
+if 'exporting = !ProcessInfo.processInfo.arguments.contains("-PKUITesting")' not in source:
+    raise SystemExit("UI-test export guard was not applied")
 
 path.write_text(source)
