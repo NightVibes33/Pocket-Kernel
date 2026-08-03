@@ -1,6 +1,8 @@
 import XCTest
 
 @MainActor final class PocketKernelUITests: XCTestCase {
+    private enum ScrollDirection { case up, down }
+
     func testOnboardingCompletesIntoHome() {
         let app = launch(reset: true, uiTesting: false, resetOnboarding: true)
         XCTAssertTrue(app.staticTexts["PocketKernel"].waitForExistence(timeout: 10))
@@ -21,9 +23,14 @@ import XCTest
 
         for name in ["Task Board", "Habit Tracker", "Quick Journal", "Inventory List", "Service Log"] {
             let before = pocketAppButtons(named: name, in: app).count
-            tap(lastPocketAppButton(named: name, in: app), timeout: 10)
+            let installButton = lastPocketAppButton(named: name, in: app)
+            scrollToElement(installButton, app: app, timeout: 10)
+            tap(installButton, timeout: 10)
             waitForButtonCount(named: name, minimum: before + 1, in: app, timeout: 10)
-            tap(pocketAppButtons(named: name, in: app).firstMatch, timeout: 8)
+
+            let installedButton = pocketAppButtons(named: name, in: app).firstMatch
+            scrollToElement(installedButton, app: app, timeout: 10, direction: .down)
+            tap(installedButton, timeout: 8)
             XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 8), name)
             tap(app.buttons["Done"], timeout: 5)
         }
@@ -31,7 +38,9 @@ import XCTest
 
     func testGenerateInstallPersistExportDeleteReimportAndRelaunch() {
         let app = launch(startTab: "create", reset: true)
-        tap(app.buttons["Generate on Device"], timeout: 15)
+        let generate = app.buttons["Generate on Device"]
+        scrollToElement(generate, app: app, timeout: 15)
+        tap(generate, timeout: 15)
 
         let install = app.buttons["Install Service Log"]
         scrollToElement(install, app: app, timeout: 25)
@@ -161,10 +170,20 @@ import XCTest
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
-    private func scrollToElement(_ element: XCUIElement, app: XCUIApplication, timeout: TimeInterval) {
+    private func scrollToElement(
+        _ element: XCUIElement,
+        app: XCUIApplication,
+        timeout: TimeInterval,
+        direction: ScrollDirection = .up
+    ) {
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.exists && Date() < deadline { app.swipeUp() }
-        XCTAssertTrue(element.exists)
+        while !element.isHittable && Date() < deadline {
+            switch direction {
+            case .up: app.swipeUp()
+            case .down: app.swipeDown()
+            }
+        }
+        XCTAssertTrue(element.isHittable)
     }
 
     private func pressAndHold(_ element: XCUIElement) {
