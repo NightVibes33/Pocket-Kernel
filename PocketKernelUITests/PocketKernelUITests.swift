@@ -26,8 +26,15 @@ import XCTest
             scrollToElement(installButton, app: app, timeout: 12)
             tap(installButton, timeout: 10)
 
+            tap(app.tabBars.buttons["Activity"], timeout: 5)
+            XCTAssertTrue(
+                app.staticTexts["Installed built-in package \(name)."].waitForExistence(timeout: 15),
+                name
+            )
+            tap(app.tabBars.buttons["Library"], timeout: 5)
+
             let installedButton = installedPocketAppButton(named: name, in: app)
-            scrollToElement(installedButton, app: app, timeout: 20, direction: .down)
+            scrollToElement(installedButton, app: app, timeout: 15, direction: .down)
             tap(installedButton, timeout: 8)
 
             let done = app.buttons["Done"]
