@@ -10,6 +10,6 @@ The shipped built-in apps are real validated `.pocketapp` resources with screens
 
 The generated blueprint preserves typed component trees, field options/defaults, action conditions/parameters/chaining, and exact network domains instead of forcing every request into a preset tracker layout.
 
-The final candidate accepts legacy package hashes while rebasing to deterministic integrity, opens built-in apps after installation, and renders record editors in place so nested presentation cannot hide the form.
+The final candidate accepts legacy package hashes while rebasing to deterministic integrity, uses one built-in open owner, and replaces runtime content directly with the active record editor.
 
 PR #4 is the authoritative final unsigned IPA verification run.
