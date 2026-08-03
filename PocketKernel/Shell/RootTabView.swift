@@ -621,6 +621,7 @@ struct RuntimeView: View {
     @State private var assetData: [String: Data] = [:]
     @State private var executor: ActionExecutor?
     @State private var editingCollection: CollectionSpec?
+    @State private var showingRecordForm = false
     @State private var formValues: [String: PocketValue] = [:]
     @State private var pendingActionID: String?
     @State private var permissionRequest: PermissionRequest?
@@ -684,7 +685,9 @@ struct RuntimeView: View {
         .task { await startRuntime() }
         .onDisappear { if !previewOnly { environment.lifecycle.markRuntimeClosed() } }
         .onChange(of: runtimeValues) { _, values in persist(values) }
-        .sheet(item: $editingCollection) { collection in recordForm(collection) }
+        .sheet(isPresented: $showingRecordForm, onDismiss: { editingCollection = nil }) {
+            if let collection = editingCollection { recordForm(collection) }
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in importRuntimeFile(result) }
         .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .pocketApp, defaultFilename: manifest.name) { result in
             if case .failure(let error) = result { runtimeError = error.localizedDescription }
@@ -743,6 +746,7 @@ struct RuntimeView: View {
            let collection = manifest.collections.first(where: { $0.id == target }) {
             formValues = Dictionary(uniqueKeysWithValues: collection.fields.map { ($0.id, $0.defaultValue) })
             editingCollection = collection
+            showingRecordForm = true
             return
         }
         execute(id, form: [:])
@@ -871,11 +875,13 @@ struct RuntimeView: View {
             Form { ForEach(collection.fields) { field in fieldEditor(field) } }
                 .navigationTitle("Add \(collection.title)")
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingCollection = nil } }
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { showingRecordForm = false }
+                    }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Save") {
                             if let action = manifest.actions.first(where: { $0.kind == .createRecord && $0.target == collection.id }) {
-                                editingCollection = nil
+                                showingRecordForm = false
                                 execute(action.id, form: formValues)
                             }
                         }
