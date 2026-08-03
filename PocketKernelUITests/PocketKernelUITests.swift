@@ -23,10 +23,15 @@ import XCTest
 
         for name in ["Task Board", "Habit Tracker", "Quick Journal", "Inventory List", "Service Log"] {
             let installButton = lastPocketAppButton(named: name, in: app)
-            scrollToElement(installButton, app: app, timeout: 10)
+            scrollToElement(installButton, app: app, timeout: 12)
             tap(installButton, timeout: 10)
+
+            let installedButton = installedPocketAppButton(named: name, in: app)
+            scrollToElement(installedButton, app: app, timeout: 20, direction: .down)
+            tap(installedButton, timeout: 8)
+
             let done = app.buttons["Done"]
-            XCTAssertTrue(done.waitForExistence(timeout: 15), name)
+            XCTAssertTrue(done.waitForExistence(timeout: 12), name)
             XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.exists, name)
             tap(done, timeout: 5)
         }
@@ -41,11 +46,12 @@ import XCTest
         let install = app.buttons["Install Service Log"]
         scrollToElement(install, app: app, timeout: 25)
         tap(install)
-        XCTAssertFalse(install.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Installed Service Log."].waitForExistence(timeout: 15))
 
         tap(app.tabBars.buttons["Library"], timeout: 5)
-        waitForButtonCount(named: "Service Log", minimum: 2, in: app, timeout: 10)
-        tap(pocketAppButtons(named: "Service Log", in: app).firstMatch, timeout: 10)
+        let installed = installedPocketAppButton(named: "Service Log", in: app)
+        scrollToElement(installed, app: app, timeout: 15, direction: .down)
+        tap(installed, timeout: 10)
 
         tap(app.buttons["Add Service"], timeout: 8)
         let service = app.textFields["Service"]
@@ -56,32 +62,39 @@ import XCTest
         app.terminate()
         let persisted = launch(startTab: "library")
         dismissRecoveryIfNeeded(persisted)
-        tap(pocketAppButtons(named: "Service Log", in: persisted).firstMatch, timeout: 10)
+        let persistedApp = installedPocketAppButton(named: "Service Log", in: persisted)
+        scrollToElement(persistedApp, app: persisted, timeout: 12, direction: .down)
+        tap(persistedApp, timeout: 10)
         let record = persisted.descendants(matching: .any)["record-field-serviceType"]
         XCTAssertTrue(record.waitForExistence(timeout: 10))
         XCTAssertTrue(record.label.localizedCaseInsensitiveContains("Oil Change"))
         tap(persisted.buttons["Done"], timeout: 5)
 
-        pressAndHold(pocketAppButtons(named: "Service Log", in: persisted).firstMatch)
+        let exportApp = installedPocketAppButton(named: "Service Log", in: persisted)
+        scrollToElement(exportApp, app: persisted, timeout: 10, direction: .down)
+        pressAndHold(exportApp)
         tap(persisted.buttons["Export"], timeout: 5)
         dismissFileExporter(in: persisted)
 
-        pressAndHold(pocketAppButtons(named: "Service Log", in: persisted).firstMatch)
+        let deleteApp = installedPocketAppButton(named: "Service Log", in: persisted)
+        pressAndHold(deleteApp)
         tap(persisted.buttons["Delete"], timeout: 5)
-        waitForButtonCount(named: "Service Log", exactly: 1, in: persisted, timeout: 8)
+        XCTAssertFalse(installedPocketAppButton(named: "Service Log", in: persisted).waitForExistence(timeout: 8))
         persisted.terminate()
 
         let reimported = launch(startTab: "library", reimportLastExport: true)
-        waitForButtonCount(named: "Service Log", minimum: 2, in: reimported, timeout: 12)
-        tap(pocketAppButtons(named: "Service Log", in: reimported).firstMatch, timeout: 10)
-        XCTAssertTrue(reimported.staticTexts["Service Log"].firstMatch.waitForExistence(timeout: 8))
+        let reimportedApp = installedPocketAppButton(named: "Service Log", in: reimported)
+        scrollToElement(reimportedApp, app: reimported, timeout: 15, direction: .down)
+        tap(reimportedApp, timeout: 10)
+        XCTAssertTrue(reimported.buttons["Done"].waitForExistence(timeout: 8))
         tap(reimported.buttons["Done"], timeout: 5)
         reimported.terminate()
 
         let relaunched = launch(startTab: "library")
-        waitForButtonCount(named: "Service Log", minimum: 2, in: relaunched, timeout: 10)
-        tap(pocketAppButtons(named: "Service Log", in: relaunched).firstMatch, timeout: 10)
-        XCTAssertTrue(relaunched.staticTexts["Service Log"].firstMatch.waitForExistence(timeout: 8))
+        let relaunchedApp = installedPocketAppButton(named: "Service Log", in: relaunched)
+        scrollToElement(relaunchedApp, app: relaunched, timeout: 15, direction: .down)
+        tap(relaunchedApp, timeout: 10)
+        XCTAssertTrue(relaunched.buttons["Done"].waitForExistence(timeout: 8))
         tap(relaunched.buttons["Done"], timeout: 5)
     }
 
@@ -121,28 +134,15 @@ import XCTest
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", name))
     }
 
+    private func installedPocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH[c] %@ AND label CONTAINS[c] %@", name, "v1 •")
+        ).firstMatch
+    }
+
     private func lastPocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
         let query = pocketAppButtons(named: name, in: app)
         return query.element(boundBy: max(query.count - 1, 0))
-    }
-
-    private func waitForButtonCount(
-        named name: String,
-        minimum: Int? = nil,
-        exactly: Int? = nil,
-        in app: XCUIApplication,
-        timeout: TimeInterval
-    ) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            let count = pocketAppButtons(named: name, in: app).count
-            if let exactly, count == exactly { return }
-            if let minimum, count >= minimum { return }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-        }
-        let actual = pocketAppButtons(named: name, in: app).count
-        if let exactly { XCTAssertEqual(actual, exactly, "Unexpected button count for \(name)") }
-        if let minimum { XCTAssertGreaterThanOrEqual(actual, minimum, "Missing installed \(name)") }
     }
 
     private func dismissRecoveryIfNeeded(_ app: XCUIApplication) {
