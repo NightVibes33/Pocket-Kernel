@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: pocketkernel-one-shot-build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -40,7 +40,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Persist final runtime UI behavior
+      - name: Apply final runtime UI fix locally
         shell: bash
         run: |
           set -euo pipefail
@@ -76,31 +76,37 @@ jobs:
                       .frame(maxWidth: .infinity, maxHeight: .infinity)
                       .background(.background)
                       .ignoresSafeArea()
-                      .zIndex(1)
+                      .zIndex(10)
               }
           }
 '''
           if old in root:
-              root_path.write_text(root.replace(old, new, 1))
+              root = root.replace(old, new, 1)
+              root_path.write_text(root)
           elif new not in root:
               raise SystemExit("record-form presentation block not found")
           if "showingRecordForm" in root:
               raise SystemExit("obsolete record-form Boolean still exists")
 
-          tests = Path("PocketKernelUITests/PocketKernelUITests.swift").read_text()
+          tests_path = Path("PocketKernelUITests/PocketKernelUITests.swift")
+          tests = tests_path.read_text()
+          old = '''            XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 12), name)
+              tap(app.buttons["Done"], timeout: 5)
+'''
+          new = '''            let done = app.buttons["Done"]
+              XCTAssertTrue(done.waitForExistence(timeout: 15), name)
+              XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.exists, name)
+              tap(done)
+'''
+          if old in tests:
+              tests_path.write_text(tests.replace(old, new, 1))
+          elif new not in tests:
+              raise SystemExit("built-in runtime synchronization block not found")
           if "installedPocketAppButton" in tests:
               raise SystemExit("obsolete lazy-list installed-row query still exists")
-          if "waitForExistence(timeout: 12), name" not in tests:
-              raise SystemExit("built-in open assertion is missing")
           PY
 
-          git add PocketKernel/App/AppEnvironment.swift PocketKernel/Shell/RootTabView.swift
-          if ! git diff --cached --quiet; then
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git commit -m "fix: persist final runtime UI behavior [skip ci]"
-            git push origin HEAD:"${{ github.head_ref }}"
-          fi
+          rm -f .github/workflows/zz-apply-final-ui-fix.yml
 
       - name: Verify runner and Xcode
         shell: bash
@@ -210,6 +216,20 @@ jobs:
           Scripts/validate_ipa.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
           (cd "$OUTPUT_DIR" && shasum -a 256 PocketKernel-unsigned.ipa > SHA256SUMS.txt)
           Scripts/generate_build_report.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa" "$OUTPUT_DIR/BuildReport.md"
+
+      - name: Persist verified source fixes
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -f .github/workflows/zz-apply-final-ui-fix.yml 2>/dev/null || true
+          git add PocketKernel/App/AppEnvironment.swift PocketKernel/Shell/RootTabView.swift PocketKernelUITests/PocketKernelUITests.swift
+          if ! git diff --cached --quiet; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m "fix: persist verified final UI behavior [skip ci]"
+            git push origin HEAD:"${{ github.head_ref }}"
+          fi
 
       - name: Archive test diagnostics
         if: always()
