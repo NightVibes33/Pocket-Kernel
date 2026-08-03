@@ -512,7 +512,6 @@ private extension XCTestCase {
     }
 }
 
-
 final class PromptBlueprintGeneratorTests: XCTestCase {
     func testPromptCompilerProducesDifferentValidatedApps() async throws {
         let generator = PromptBlueprintGenerator()
