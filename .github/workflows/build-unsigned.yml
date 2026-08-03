@@ -12,7 +12,7 @@ on:
         type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: pocketkernel-one-shot-build-${{ github.ref }}
@@ -38,50 +38,6 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
-
-      - name: Apply final UI fix in build workspace
-        shell: bash
-        run: |
-          set -euo pipefail
-          /usr/bin/python3 <<'PY'
-          from pathlib import Path
-
-          root_path = Path("PocketKernel/Shell/RootTabView.swift")
-          root = root_path.read_text()
-          old = '''        .fullScreenCover(item: $editingCollection) { collection in
-              recordForm(collection)
-          }
-'''
-          new = '''        .overlay {
-              if let collection = editingCollection {
-                  recordForm(collection)
-                      .frame(maxWidth: .infinity, maxHeight: .infinity)
-                      .background(.background)
-                      .ignoresSafeArea()
-                      .zIndex(10)
-              }
-          }
-'''
-          if old in root:
-              root_path.write_text(root.replace(old, new, 1))
-          elif new not in root:
-              raise SystemExit("record-form presentation block not found")
-
-          tests_path = Path("PocketKernelUITests/PocketKernelUITests.swift")
-          tests = tests_path.read_text()
-          old = '''            XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 12), name)
-              tap(app.buttons["Done"], timeout: 5)
-'''
-          new = '''            let done = app.buttons["Done"]
-              XCTAssertTrue(done.waitForExistence(timeout: 15), name)
-              XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.exists, name)
-              tap(done)
-'''
-          if old in tests:
-              tests_path.write_text(tests.replace(old, new, 1))
-          elif new not in tests:
-              raise SystemExit("built-in runtime synchronization block not found")
-          PY
 
       - name: Verify runner and Xcode
         shell: bash
