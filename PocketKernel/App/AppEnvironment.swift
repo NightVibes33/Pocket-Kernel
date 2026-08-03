@@ -198,6 +198,7 @@ enum ModelAvailabilityState: Sendable, Equatable {
             previousDraft = nil
             validationIssues = []
             await load()
+            generationError = "Installed \(draft.name)."
         } catch { generationError = error.localizedDescription }
     }
 
@@ -207,9 +208,6 @@ enum ModelAvailabilityState: Sendable, Equatable {
             try await store.install(template.package)
             try await store.log(appID: template.id, level: .info, category: "install", message: "Installed built-in package \(template.manifest.name).")
             await load()
-            if let app = installed.first(where: { $0.id == template.id }) {
-                await open(app)
-            }
         } catch { startupError = error.localizedDescription }
     }
 
