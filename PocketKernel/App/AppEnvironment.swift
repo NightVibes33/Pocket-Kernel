@@ -307,7 +307,7 @@ enum ModelAvailabilityState: Sendable, Equatable {
 
     func rollback(_ id: UUID) async {
         guard let store else { return }
-        do { try await store.rollbackManifest(id); await load() }
+        do { try await store.rollbackManifest(id: id); await load() }
         catch { startupError = error.localizedDescription }
     }
 
