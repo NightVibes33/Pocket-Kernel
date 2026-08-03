@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 xcrun simctl list devices available -j | /usr/bin/python3 -c '
 import json, re, sys
-d=json.load(sys.stdin)["devices"]
-r=[]
-for runtime, devices in d.items():
- m=re.search(r"iOS-(26(?:-[0-9]+)*)$", runtime)
- if m: r.append((tuple(map(int,m.group(1).split("-"))), devices))
-for _, devices in sorted(r, reverse=True):
- for device in devices:
-  if device.get("isAvailable") and device.get("name", "").startswith("iPhone"):
-   print(device["udid"]); raise SystemExit(0)
-print("No available iOS 26 iPhone simulator", file=sys.stderr); raise SystemExit(1)'
-
+payload = json.load(sys.stdin)
+candidates = []
+for runtime, devices in payload.get("devices", {}).items():
+    match = re.search(r"iOS-(26)-(\d+)(?:-(\d+))?", runtime)
+    if not match:
+        continue
+    version = tuple(int(value or 0) for value in match.groups())
+    for device in devices:
+        if not device.get("isAvailable", False):
+            continue
+        name = device.get("name", "")
+        if not name.startswith("iPhone"):
+            continue
+        candidates.append((version, name, device["udid"]))
+if not candidates:
+    print("No available iPhone simulator with an iOS 26 runtime was found.", file=sys.stderr)
+    sys.exit(1)
+candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+print(candidates[0][2])
+'

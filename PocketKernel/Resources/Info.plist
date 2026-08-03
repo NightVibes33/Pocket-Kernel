@@ -3,13 +3,14 @@
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+<key>CFBundleName</key><string>PocketKernel</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
 <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
 <key>CFBundleDisplayName</key><string>Pocket Kernel</string>
-<key>CFBundleDocumentTypes</key><array><dict><key>CFBundleTypeExtensions</key><array><string>pocketapp</string></array><key>CFBundleTypeName</key><string>Pocket App</string><key>CFBundleTypeRole</key><string>Editor</string><key>LSItemContentTypes</key><array><string>com.nightvibes33.pocketapp</string></array></dict></array>
-<key>UTExportedTypeDeclarations</key><array><dict><key>UTTypeConformsTo</key><array><string>public.data</string></array><key>UTTypeDescription</key><string>Pocket App</string><key>UTTypeIdentifier</key><string>com.nightvibes33.pocketapp</string><key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>pocketapp</string></array></dict></dict></array>
-<key>UILaunchScreen</key><dict/>
+<key>CFBundleDocumentTypes</key><array><dict><key>CFBundleTypeExtensions</key><array><string>pocketapp</string></array><key>CFBundleTypeName</key><string>Pocket App</string><key>CFBundleTypeRole</key><string>Editor</string><key>LSHandlerRank</key><string>Owner</string><key>LSItemContentTypes</key><array><string>com.nightvibes33.pocketapp</string></array></dict></array>
+<key>UTExportedTypeDeclarations</key><array><dict><key>UTTypeConformsTo</key><array><string>public.data</string></array><key>UTTypeDescription</key><string>Pocket App</string><key>UTTypeIdentifier</key><string>com.nightvibes33.pocketapp</string><key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>pocketapp</string></array><key>public.mime-type</key><string>application/vnd.pocketkernel.app+json</string></dict></dict></array>
+<key>UILaunchScreen</key><dict><key>UIColorName</key><string>LaunchBackground</string></dict>
 <key>UIApplicationSupportsIndirectInputEvents</key><true/>
 <key>LSSupportsOpeningDocumentsInPlace</key><true/>
 <key>UIFileSharingEnabled</key><true/>

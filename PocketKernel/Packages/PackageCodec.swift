@@ -1,5 +1,7 @@
+import CoreFoundation
 import CryptoKit
 import Foundation
+import SwiftUI
 import UniformTypeIdentifiers
 
 extension UTType {
@@ -8,6 +10,7 @@ extension UTType {
 
 enum PackageError: LocalizedError, Equatable {
     case oversized, malformed, invalidHash, invalidAsset(String), invalidManifest([ValidationIssue])
+
     var errorDescription: String? {
         switch self {
         case .oversized: "Package exceeds the 25 MB limit."
@@ -21,32 +24,149 @@ enum PackageError: LocalizedError, Equatable {
 
 struct PackageCodec: Sendable {
     func makePackage(manifest: MicroAppManifest, assets: [PackageAsset] = []) throws -> PocketPackage {
-        let hash = sha256(try makeEncoder().encode(manifest))
-        return PocketPackage(manifest: manifest, assets: assets, integrity: .init(manifestHash: hash))
+        PocketPackage(manifest: manifest, assets: assets, integrity: try integrity(for: manifest))
     }
 
-    func encode(_ package: PocketPackage) throws -> Data { try makeEncoder().encode(package) }
+    func integrity(for manifest: MicroAppManifest) throws -> PackageIntegrity {
+        let encoded = try makeEncoder().encode(manifest)
+        let object = try JSONSerialization.jsonObject(with: encoded)
+        return .init(manifestHash: sha256(try canonicalManifestJSON(object)))
+    }
+
+    func encode(_ package: PocketPackage) throws -> Data {
+        let data = try makeEncoder().encode(package)
+        guard data.count <= PocketLimits.packageBytes else { throw PackageError.oversized }
+        return data
+    }
 
     func decode(_ data: Data) throws -> PocketPackage {
         guard data.count <= PocketLimits.packageBytes else { throw PackageError.oversized }
-        let package: PocketPackage
-        do { package = try makeDecoder().decode(PocketPackage.self, from: data) } catch { throw PackageError.malformed }
-        guard package.formatVersion == 1, package.integrity.algorithm == "sha256" else { throw PackageError.malformed }
-        guard sha256(try makeEncoder().encode(package.manifest)) == package.integrity.manifestHash.lowercased() else { throw PackageError.invalidHash }
+
+        let rawCanonicalManifest: Data
+        do { rawCanonicalManifest = try rawManifestJSON(in: data) }
+        catch { throw PackageError.malformed }
+
+        var package: PocketPackage
+        do { package = try makeDecoder().decode(PocketPackage.self, from: data) }
+        catch { throw PackageError.malformed }
+
+        guard package.formatVersion == 1, package.integrity.algorithm == "sha256" else {
+            throw PackageError.malformed
+        }
+        let incomingHash = package.integrity.manifestHash.lowercased()
+        let normalizedIntegrity = try integrity(for: package.manifest)
+        guard incomingHash == sha256(rawCanonicalManifest)
+            || incomingHash == normalizedIntegrity.manifestHash
+        else {
+            throw PackageError.invalidHash
+        }
+
         var decodedTotal = 0
         var assetIDs = Set<String>()
         for asset in package.assets {
-            guard assetIDs.insert(asset.id).inserted, !asset.id.contains(".."), !asset.id.contains("/") else { throw PackageError.invalidAsset(asset.id) }
-            guard let decoded = Data(base64Encoded: asset.base64Data) else { throw PackageError.invalidAsset(asset.id) }
+            guard assetIDs.insert(asset.id).inserted,
+                  !asset.id.isEmpty,
+                  !asset.id.contains(".."),
+                  !asset.id.contains("/"),
+                  !asset.id.contains("\\")
+            else { throw PackageError.invalidAsset(asset.id) }
+            guard let decoded = Data(base64Encoded: asset.base64Data),
+                  decoded.count <= PocketLimits.assetBytes
+            else { throw PackageError.invalidAsset(asset.id) }
             decodedTotal += decoded.count
-            guard decodedTotal <= PocketLimits.packageBytes, sha256(decoded) == asset.sha256.lowercased() else { throw PackageError.invalidAsset(asset.id) }
+            guard decodedTotal <= PocketLimits.packageBytes,
+                  sha256(decoded) == asset.sha256.lowercased()
+            else { throw PackageError.invalidAsset(asset.id) }
         }
+
         let issues = ManifestValidator().validate(package.manifest).filter { $0.severity == .error }
         guard issues.isEmpty else { throw PackageError.invalidManifest(issues) }
+
+        package.integrity = normalizedIntegrity
         return package
     }
 
-    private func sha256(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
-    private func makeEncoder() -> JSONEncoder { let value = JSONEncoder(); value.outputFormatting = [.sortedKeys]; return value }
+    private func rawManifestJSON(in packageData: Data) throws -> Data {
+        guard let package = try JSONSerialization.jsonObject(with: packageData) as? [String: Any],
+              let manifest = package["manifest"]
+        else { throw PackageError.malformed }
+        return try canonicalJSON(manifest)
+    }
+
+    private func canonicalManifestJSON(_ object: Any) throws -> Data {
+        guard var manifest = object as? [String: Any] else { throw PackageError.malformed }
+        if let values = manifest["capabilities"] as? [Any] {
+            let capabilities = try values.map { value -> String in
+                guard let capability = value as? String else { throw PackageError.malformed }
+                return capability
+            }
+            manifest["capabilities"] = capabilities.sorted()
+        }
+        return try canonicalJSON(manifest)
+    }
+
+    private func canonicalJSON(_ data: Data) throws -> Data {
+        try canonicalJSON(JSONSerialization.jsonObject(with: data))
+    }
+
+    private func canonicalJSON(_ object: Any) throws -> Data {
+        let normalized = try normalizeJSON(object)
+        guard JSONSerialization.isValidJSONObject(normalized) else { throw PackageError.malformed }
+        return try JSONSerialization.data(
+            withJSONObject: normalized,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+    }
+
+    private func normalizeJSON(_ object: Any) throws -> Any {
+        switch object {
+        case let dictionary as [String: Any]:
+            return try dictionary.mapValues(normalizeJSON)
+        case let array as [Any]:
+            return try array.map(normalizeJSON)
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return number }
+            let value = number.doubleValue
+            guard value.isFinite else { throw PackageError.malformed }
+            let maximumSafeInteger = 9_007_199_254_740_991.0
+            if value.rounded(.towardZero) == value, abs(value) <= maximumSafeInteger {
+                return NSNumber(value: Int64(value))
+            }
+            return number
+        case is NSNull:
+            return object
+        case is String:
+            return object
+        default:
+            throw PackageError.malformed
+        }
+    }
+
+    private func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func makeEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return encoder
+    }
+
     private func makeDecoder() -> JSONDecoder { JSONDecoder() }
+}
+
+struct PocketAppDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.pocketApp] }
+    var data: Data
+
+    init(data: Data = Data()) { self.data = data }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents else { throw PackageError.malformed }
+        self.data = data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
 }
