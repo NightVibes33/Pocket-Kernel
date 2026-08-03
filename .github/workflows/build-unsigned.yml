@@ -45,77 +45,79 @@ jobs:
         run: |
           set -euo pipefail
           /usr/bin/python3 <<'PY'
+          import re
           from pathlib import Path
 
           environment_path = Path("PocketKernel/App/AppEnvironment.swift")
           environment = environment_path.read_text()
-          old = '''            await load()
-          } catch { startupError = error.localizedDescription }
-          }
-
-          func importPackage(_ data: Data) async throws {
-          '''
-          new = '''            await load()
-              if let app = installed.first(where: { $0.id == template.id }) {
-                  await open(app)
-              }
-          } catch { startupError = error.localizedDescription }
-          }
-
-          func importPackage(_ data: Data) async throws {
-          '''
-          if old not in environment:
-              raise SystemExit("installTemplate completion block not found")
-          environment_path.write_text(environment.replace(old, new, 1))
+          pattern = re.compile(
+              r'(func installTemplate\(_ template: BundledTemplate\) async \{.*?'
+              r'try await store\.log\([^\n]*Installed built-in package[^\n]*\)\n)'
+              r'(\s*)await load\(\)',
+              re.DOTALL
+          )
+          environment, count = pattern.subn(
+              lambda match: (
+                  match.group(1)
+                  + match.group(2) + 'await load()\n'
+                  + match.group(2) + 'if let app = installed.first(where: { $0.id == template.id }) {\n'
+                  + match.group(2) + '    await open(app)\n'
+                  + match.group(2) + '}'
+              ),
+              environment,
+              count=1
+          )
+          if count != 1:
+              raise SystemExit(f"installTemplate patch count was {count}")
+          environment_path.write_text(environment)
 
           root_path = Path("PocketKernel/Shell/RootTabView.swift")
           root = root_path.read_text()
           replacements = [
               ("    @State private var showingRecordForm = false\n", ""),
-              ('''.fullScreenCover(isPresented: $showingRecordForm, onDismiss: { editingCollection = nil }) {
-              if let collection = editingCollection { recordForm(collection) }
-          }''', '''.fullScreenCover(item: $editingCollection) { collection in
-              recordForm(collection)
-          }'''),
-              ('''            editingCollection = collection
-              showingRecordForm = true
-              return''', '''            editingCollection = collection
-              return'''),
+              (
+                  ".fullScreenCover(isPresented: $showingRecordForm, onDismiss: { editingCollection = nil }) {",
+                  ".fullScreenCover(item: $editingCollection) { collection in"
+              ),
+              (
+                  "            if let collection = editingCollection { recordForm(collection) }",
+                  "            recordForm(collection)"
+              ),
+              ("            showingRecordForm = true\n", ""),
               ('Button("Cancel") { showingRecordForm = false }', 'Button("Cancel") { editingCollection = nil }'),
-              ('''                                showingRecordForm = false
-                                  execute(action.id, form: formValues)''', '''                                editingCollection = nil
-                                  execute(action.id, form: formValues)''')
+              ("                                showingRecordForm = false", "                                editingCollection = nil")
           ]
           for old, new in replacements:
               if old not in root:
-                  raise SystemExit(f"RootTabView patch block not found: {old[:60]!r}")
+                  raise SystemExit(f"RootTabView patch block not found: {old!r}")
               root = root.replace(old, new, 1)
           root_path.write_text(root)
 
           tests_path = Path("PocketKernelUITests/PocketKernelUITests.swift")
           tests = tests_path.read_text()
-          old = '''            let installedButton = installedPocketAppButton(named: name, in: app)
-              scrollToElement(installedButton, app: app, timeout: 12, direction: .down)
-              tap(installedButton, timeout: 8)
-              XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 8), name)
-              tap(app.buttons["Done"], timeout: 5)
-          '''
-          new = '''            XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 12), name)
-              tap(app.buttons["Done"], timeout: 5)
-          '''
-          if old not in tests:
-              raise SystemExit("Built-in UI test block not found")
-          tests = tests.replace(old, new, 1)
-          old = '''    private func installedPocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
-              app.buttons.matching(
-                  NSPredicate(format: "label BEGINSWITH[c] %@ AND label CONTAINS[c] %@", name, "v1 •")
-              ).firstMatch
-          }
-
-          '''
-          if old not in tests:
-              raise SystemExit("Installed button helper not found")
-          tests_path.write_text(tests.replace(old, "", 1))
+          for line in [
+              "            let installedButton = installedPocketAppButton(named: name, in: app)\n",
+              "            scrollToElement(installedButton, app: app, timeout: 12, direction: .down)\n",
+              "            tap(installedButton, timeout: 8)\n"
+          ]:
+              if line not in tests:
+                  raise SystemExit(f"Built-in UI test line not found: {line!r}")
+              tests = tests.replace(line, "", 1)
+          old_assertion = "XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 8), name)"
+          new_assertion = "XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 12), name)"
+          if old_assertion not in tests:
+              raise SystemExit("Built-in heading assertion not found")
+          tests = tests.replace(old_assertion, new_assertion, 1)
+          tests, count = re.subn(
+              r'\n    private func installedPocketAppButton\(named name: String, in app: XCUIApplication\) -> XCUIElement \{.*?\n    \}\n',
+              '\n',
+              tests,
+              count=1,
+              flags=re.DOTALL
+          )
+          if count != 1:
+              raise SystemExit(f"Installed button helper removal count was {count}")
+          tests_path.write_text(tests)
           PY
 
           git add PocketKernel/App/AppEnvironment.swift PocketKernel/Shell/RootTabView.swift PocketKernelUITests/PocketKernelUITests.swift
