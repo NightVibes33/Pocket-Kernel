@@ -40,67 +40,211 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Persist final runtime UI behavior
+      - name: Persist final runtime state flow
         shell: bash
         run: |
           set -euo pipefail
           /usr/bin/python3 <<'PY'
           from pathlib import Path
 
-          environment_path = Path("PocketKernel/App/AppEnvironment.swift")
-          environment = environment_path.read_text()
-          marker = "if let app = installed.first(where: { $0.id == template.id })"
-          if marker not in environment:
-              log_line = '            try await store.log(appID: template.id, level: .info, category: "install", message: "Installed built-in package \\(template.manifest.name).")\n'
-              old = log_line + "            await load()"
-              new = (
-                  log_line
-                  + "            await load()\n"
-                  + "            if let app = installed.first(where: { $0.id == template.id }) {\n"
-                  + "                await open(app)\n"
-                  + "            }"
-              )
-              if old not in environment:
-                  raise SystemExit("installTemplate insertion point not found")
-              environment_path.write_text(environment.replace(old, new, 1))
-
           root_path = Path("PocketKernel/Shell/RootTabView.swift")
           root = root_path.read_text()
-          old = (
-              "        .fullScreenCover(item: $editingCollection) { collection in\n"
-              "            recordForm(collection)\n"
-              "        }\n"
-          )
-          new = (
-              "        .overlay {\n"
-              "            if let collection = editingCollection {\n"
-              "                recordForm(collection)\n"
-              "                    .frame(maxWidth: .infinity, maxHeight: .infinity)\n"
-              "                    .background(.background)\n"
-              "                    .ignoresSafeArea()\n"
-              "                    .zIndex(1)\n"
-              "            }\n"
-              "        }\n"
-          )
-          if old in root:
-              root_path.write_text(root.replace(old, new, 1))
-          elif new not in root:
-              raise SystemExit("record-form presentation block not found")
-          if "showingRecordForm" in root:
-              raise SystemExit("obsolete record-form Boolean still exists")
 
-          tests = Path("PocketKernelUITests/PocketKernelUITests.swift").read_text()
-          if "installedPocketAppButton" in tests:
-              raise SystemExit("obsolete lazy-list installed-row query still exists")
-          if "waitForExistence(timeout: 12), name" not in tests:
-              raise SystemExit("built-in open assertion is missing")
+          library_old = "\n".join([
+              "                        Button {",
+              "                            Task {",
+              "                                await environment.installTemplate(template)",
+              "                                if let app = environment.installed.first(where: { $0.id == template.id }) {",
+              "                                    await environment.open(app)",
+              "                                }",
+              "                            }",
+              "                        } label: {",
+          ]) + "\n"
+          library_new = "\n".join([
+              "                        Button { Task { await environment.installTemplate(template) } } label: {",
+          ]) + "\n"
+          if library_old in root:
+              root = root.replace(library_old, library_new, 1)
+          elif library_new not in root:
+              raise SystemExit("single-owner built-in install block not found")
+
+          body_old = "\n".join([
+              "    var body: some View {",
+              "        List {",
+              "            if manifest.screens.count > 1 {",
+              "                Picker(\"Screen\", selection: $selectedScreenID) { ForEach(manifest.screens) { Text($0.title).tag($0.id) } }.pickerStyle(.segmented)",
+              "            }",
+              "            if let screen {",
+              "                ForEach(screen.components) { component in",
+              "                    ComponentRenderer(",
+              "                        component: component,",
+              "                        recordsByCollection: recordsByCollection,",
+              "                        collectionSpecs: collectionSpecs,",
+              "                        assetData: assetData,",
+              "                        runtimeValues: $runtimeValues,",
+              "                        runAction: runAction,",
+              "                        importFile: { importing = true },",
+              "                        exportFile: prepareExport",
+              "                    )",
+              "                }",
+              "            } else {",
+              "                ContentUnavailableView(\"Invalid Screen\", systemImage: \"exclamationmark.triangle\", description: Text(\"The entry screen is missing.\"))",
+              "            }",
+              "        }",
+              "        .navigationTitle(screen?.title ?? manifest.name)",
+              "        .toolbar {",
+              "            if !previewOnly {",
+              "                ToolbarItemGroup(placement: .topBarTrailing) {",
+              "                    Button { undoLast() } label: { Label(\"Undo\", systemImage: \"arrow.uturn.backward\") }",
+              "                        .disabled(!canUndo)",
+              "                    Button(\"Done\") { environment.lifecycle.markRuntimeClosed(); dismiss() }",
+              "                }",
+              "            }",
+              "        }",
+              "        .task { await startRuntime() }",
+              "        .onDisappear { if !previewOnly { environment.lifecycle.markRuntimeClosed() } }",
+              "        .onChange(of: runtimeValues) { _, values in persist(values) }",
+              "        .overlay {",
+              "            if let collection = editingCollection {",
+              "                recordForm(collection)",
+              "                    .frame(maxWidth: .infinity, maxHeight: .infinity)",
+              "                    .background(.background)",
+              "                    .ignoresSafeArea()",
+              "                    .zIndex(1)",
+              "            }",
+              "        }",
+          ]) + "\n"
+          body_new = "\n".join([
+              "    var body: some View {",
+              "        Group {",
+              "            if let collection = editingCollection {",
+              "                recordForm(collection)",
+              "            } else {",
+              "                runtimeContent",
+              "            }",
+              "        }",
+              "        .task { await startRuntime() }",
+              "        .onDisappear { if !previewOnly { environment.lifecycle.markRuntimeClosed() } }",
+              "        .onChange(of: runtimeValues) { _, values in persist(values) }",
+          ]) + "\n"
+          if body_old in root:
+              root = root.replace(body_old, body_new, 1)
+          elif body_new not in root:
+              raise SystemExit("RuntimeView body block not found")
+
+          permission_marker = "    @ViewBuilder private var permissionButtons: some View {\n"
+          runtime_content = "\n".join([
+              "    private var runtimeContent: some View {",
+              "        List {",
+              "            if manifest.screens.count > 1 {",
+              "                Picker(\"Screen\", selection: $selectedScreenID) { ForEach(manifest.screens) { Text($0.title).tag($0.id) } }.pickerStyle(.segmented)",
+              "            }",
+              "            if let screen {",
+              "                ForEach(screen.components) { component in",
+              "                    ComponentRenderer(",
+              "                        component: component,",
+              "                        recordsByCollection: recordsByCollection,",
+              "                        collectionSpecs: collectionSpecs,",
+              "                        assetData: assetData,",
+              "                        runtimeValues: $runtimeValues,",
+              "                        runAction: runAction,",
+              "                        importFile: { importing = true },",
+              "                        exportFile: prepareExport",
+              "                    )",
+              "                }",
+              "            } else {",
+              "                ContentUnavailableView(\"Invalid Screen\", systemImage: \"exclamationmark.triangle\", description: Text(\"The entry screen is missing.\"))",
+              "            }",
+              "        }",
+              "        .navigationTitle(screen?.title ?? manifest.name)",
+              "        .toolbar {",
+              "            if !previewOnly {",
+              "                ToolbarItemGroup(placement: .topBarTrailing) {",
+              "                    Button { undoLast() } label: { Label(\"Undo\", systemImage: \"arrow.uturn.backward\") }",
+              "                        .disabled(!canUndo)",
+              "                    Button(\"Done\") { environment.lifecycle.markRuntimeClosed(); dismiss() }",
+              "                }",
+              "            }",
+              "        }",
+              "    }",
+              "",
+          ]) + "\n"
+          if "    private var runtimeContent: some View {" not in root:
+              if permission_marker not in root:
+                  raise SystemExit("runtimeContent insertion point not found")
+              root = root.replace(permission_marker, runtime_content + permission_marker, 1)
+
+          form_old = "\n".join([
+              "    private func recordForm(_ collection: CollectionSpec) -> some View {",
+              "        NavigationStack {",
+              "            Form { ForEach(collection.fields) { field in fieldEditor(field) } }",
+              "                .navigationTitle(\"Add \\(collection.title)\")",
+              "                .toolbar {",
+              "                    ToolbarItem(placement: .cancellationAction) {",
+              "                        Button(\"Cancel\") { editingCollection = nil }",
+              "                    }",
+              "                    ToolbarItem(placement: .confirmationAction) {",
+              "                        Button(\"Save\") {",
+              "                            if let action = manifest.actions.first(where: { $0.kind == .createRecord && $0.target == collection.id }) {",
+              "                                editingCollection = nil",
+              "                                execute(action.id, form: formValues)",
+              "                            }",
+              "                        }",
+              "                    }",
+              "                }",
+              "        }",
+              "    }",
+          ]) + "\n"
+          form_new = "\n".join([
+              "    private func recordForm(_ collection: CollectionSpec) -> some View {",
+              "        Form { ForEach(collection.fields) { field in fieldEditor(field) } }",
+              "            .navigationTitle(\"Add \\(collection.title)\")",
+              "            .toolbar {",
+              "                ToolbarItem(placement: .cancellationAction) {",
+              "                    Button(\"Cancel\") { editingCollection = nil }",
+              "                }",
+              "                ToolbarItem(placement: .confirmationAction) {",
+              "                    Button(\"Save\") {",
+              "                        if let action = manifest.actions.first(where: { $0.kind == .createRecord && $0.target == collection.id }) {",
+              "                            editingCollection = nil",
+              "                            execute(action.id, form: formValues)",
+              "                        }",
+              "                    }",
+              "                }",
+              "            }",
+              "    }",
+          ]) + "\n"
+          if form_old in root:
+              root = root.replace(form_old, form_new, 1)
+          elif form_new not in root:
+              raise SystemExit("inline record form block not found")
+          root_path.write_text(root)
+
+          tests_path = Path("PocketKernelUITests/PocketKernelUITests.swift")
+          tests = tests_path.read_text()
+          test_old = "\n".join([
+              "            tap(installButton, timeout: 10)",
+              "            XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 12), name)",
+              "            tap(app.buttons[\"Done\"], timeout: 5)",
+          ]) + "\n"
+          test_new = "\n".join([
+              "            tap(installButton, timeout: 10)",
+              "            let done = app.buttons[\"Done\"]",
+              "            XCTAssertTrue(done.waitForExistence(timeout: 15), name)",
+              "            XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.exists, name)",
+              "            tap(done, timeout: 5)",
+          ]) + "\n"
+          if test_old in tests:
+              tests_path.write_text(tests.replace(test_old, test_new, 1))
+          elif test_new not in tests:
+              raise SystemExit("built-in runtime wait block not found")
           PY
 
-          git add PocketKernel/App/AppEnvironment.swift PocketKernel/Shell/RootTabView.swift
+          git add PocketKernel/Shell/RootTabView.swift PocketKernelUITests/PocketKernelUITests.swift
           if ! git diff --cached --quiet; then
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git commit -m "fix: persist final runtime UI behavior [skip ci]"
+            git commit -m "fix: make runtime UI state single-owner [skip ci]"
             git push origin HEAD:"${{ github.head_ref }}"
           fi
 
