@@ -685,7 +685,7 @@ struct RuntimeView: View {
         .task { await startRuntime() }
         .onDisappear { if !previewOnly { environment.lifecycle.markRuntimeClosed() } }
         .onChange(of: runtimeValues) { _, values in persist(values) }
-        .sheet(isPresented: $showingRecordForm, onDismiss: { editingCollection = nil }) {
+        .fullScreenCover(isPresented: $showingRecordForm, onDismiss: { editingCollection = nil }) {
             if let collection = editingCollection { recordForm(collection) }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in importRuntimeFile(result) }
