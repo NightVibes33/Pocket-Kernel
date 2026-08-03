@@ -72,8 +72,7 @@ import XCTest
         tap(persisted.buttons["Export"], timeout: 5)
         dismissFileExporter(in: persisted)
 
-        pressAndHold(generatedServiceLogButton(in: persisted))
-        tap(persisted.buttons["Delete"], timeout: 5)
+        swipeToDelete(generatedServiceLogButton(in: persisted), app: persisted)
         waitForButtonCount(named: "Service Log", exactly: 1, in: persisted, timeout: 8)
         persisted.terminate()
 
@@ -228,5 +227,12 @@ import XCTest
         XCTAssertTrue(element.waitForExistence(timeout: 8))
         XCTAssertTrue(element.isHittable)
         element.press(forDuration: 1.2)
+    }
+
+    private func swipeToDelete(_ element: XCUIElement, app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 8))
+        XCTAssertTrue(element.isHittable)
+        element.swipeLeft()
+        tap(app.buttons["Delete"], timeout: 5)
     }
 }
