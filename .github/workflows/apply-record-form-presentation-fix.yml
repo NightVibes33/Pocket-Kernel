@@ -1,0 +1,67 @@
+name: Apply Record Form Presentation Fix
+
+on:
+  push:
+    branches: [pocketkernel-1.0-full-rebuild]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+      - name: Stabilize record form presentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('PocketKernel/Shell/RootTabView.swift')
+          source = path.read_text()
+
+          replacements = [
+              (
+                  '''    @State private var editingCollection: CollectionSpec?\n    @State private var formValues: [String: PocketValue] = [:]\n''',
+                  '''    @State private var editingCollection: CollectionSpec?\n    @State private var showingRecordForm = false\n    @State private var formValues: [String: PocketValue] = [:]\n'''
+              ),
+              (
+                  '''        .sheet(item: $editingCollection) { collection in recordForm(collection) }\n''',
+                  '''        .sheet(isPresented: $showingRecordForm, onDismiss: { editingCollection = nil }) {\n            if let collection = editingCollection { recordForm(collection) }\n        }\n'''
+              ),
+              (
+                  '''            formValues = Dictionary(uniqueKeysWithValues: collection.fields.map { ($0.id, $0.defaultValue) })\n            editingCollection = collection\n            return\n''',
+                  '''            formValues = Dictionary(uniqueKeysWithValues: collection.fields.map { ($0.id, $0.defaultValue) })\n            editingCollection = collection\n            showingRecordForm = true\n            return\n'''
+              ),
+              (
+                  '''                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingCollection = nil } }\n''',
+                  '''                    ToolbarItem(placement: .cancellationAction) {\n                        Button("Cancel") { showingRecordForm = false }\n                    }\n'''
+              ),
+              (
+                  '''                                editingCollection = nil\n                                execute(action.id, form: formValues)\n''',
+                  '''                                showingRecordForm = false\n                                execute(action.id, form: formValues)\n'''
+              )
+          ]
+
+          for old, new in replacements:
+              if old not in source:
+                  raise SystemExit(f'Missing RootTabView anchor: {old[:100]!r}')
+              source = source.replace(old, new, 1)
+
+          path.write_text(source)
+          Path('.github/workflows/apply-record-form-presentation-fix.yml').unlink()
+          trigger = Path('.github/record-form-fix-trigger')
+          if trigger.exists(): trigger.unlink()
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PocketKernel/Shell/RootTabView.swift .github/workflows/apply-record-form-presentation-fix.yml .github/record-form-fix-trigger
+          git commit -m 'Stabilize runtime record form presentation'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
