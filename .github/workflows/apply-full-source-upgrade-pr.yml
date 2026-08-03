@@ -1,0 +1,29 @@
+name: Integrate PocketKernel Production Source
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-full-source-upgrade-pr.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 1
+      - name: Apply production source upgrade
+        run: python3 Scripts/apply_full_source_upgrade.py
+      - name: Commit production source
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Integrate runtime source and prompt compiler tests"
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
