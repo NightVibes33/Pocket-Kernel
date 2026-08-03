@@ -40,91 +40,48 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Persist final UI race fixes
+      - name: Persist built-in install and open behavior
         shell: bash
         run: |
           set -euo pipefail
           /usr/bin/python3 <<'PY'
-          import re
           from pathlib import Path
 
           environment_path = Path("PocketKernel/App/AppEnvironment.swift")
           environment = environment_path.read_text()
-          pattern = re.compile(
-              r'(func installTemplate\(_ template: BundledTemplate\) async \{.*?'
-              r'try await store\.log\([^\n]*Installed built-in package[^\n]*\)\n)'
-              r'(\s*)await load\(\)',
-              re.DOTALL
-          )
-          environment, count = pattern.subn(
-              lambda match: (
-                  match.group(1)
-                  + match.group(2) + 'await load()\n'
-                  + match.group(2) + 'if let app = installed.first(where: { $0.id == template.id }) {\n'
-                  + match.group(2) + '    await open(app)\n'
-                  + match.group(2) + '}'
-              ),
-              environment,
-              count=1
-          )
-          if count != 1:
-              raise SystemExit(f"installTemplate patch count was {count}")
-          environment_path.write_text(environment)
+          marker = "if let app = installed.first(where: { $0.id == template.id })"
+          if marker not in environment:
+              log_line = '            try await store.log(appID: template.id, level: .info, category: "install", message: "Installed built-in package \\(template.manifest.name).")\n'
+              old = log_line + "            await load()"
+              new = (
+                  log_line
+                  + "            await load()\n"
+                  + "            if let app = installed.first(where: { $0.id == template.id }) {\n"
+                  + "                await open(app)\n"
+                  + "            }"
+              )
+              if old not in environment:
+                  raise SystemExit("installTemplate insertion point not found")
+              environment_path.write_text(environment.replace(old, new, 1))
 
-          root_path = Path("PocketKernel/Shell/RootTabView.swift")
-          root = root_path.read_text()
-          replacements = [
-              ("    @State private var showingRecordForm = false\n", ""),
-              (
-                  ".fullScreenCover(isPresented: $showingRecordForm, onDismiss: { editingCollection = nil }) {",
-                  ".fullScreenCover(item: $editingCollection) { collection in"
-              ),
-              (
-                  "            if let collection = editingCollection { recordForm(collection) }",
-                  "            recordForm(collection)"
-              ),
-              ("            showingRecordForm = true\n", ""),
-              ('Button("Cancel") { showingRecordForm = false }', 'Button("Cancel") { editingCollection = nil }'),
-              ("                                showingRecordForm = false", "                                editingCollection = nil")
-          ]
-          for old, new in replacements:
-              if old not in root:
-                  raise SystemExit(f"RootTabView patch block not found: {old!r}")
-              root = root.replace(old, new, 1)
-          root_path.write_text(root)
+          root = Path("PocketKernel/Shell/RootTabView.swift").read_text()
+          if ".fullScreenCover(item: $editingCollection) { collection in" not in root:
+              raise SystemExit("item-driven record editor is missing")
+          if "showingRecordForm" in root:
+              raise SystemExit("obsolete record-form Boolean still exists")
 
-          tests_path = Path("PocketKernelUITests/PocketKernelUITests.swift")
-          tests = tests_path.read_text()
-          for line in [
-              "            let installedButton = installedPocketAppButton(named: name, in: app)\n",
-              "            scrollToElement(installedButton, app: app, timeout: 12, direction: .down)\n",
-              "            tap(installedButton, timeout: 8)\n"
-          ]:
-              if line not in tests:
-                  raise SystemExit(f"Built-in UI test line not found: {line!r}")
-              tests = tests.replace(line, "", 1)
-          old_assertion = "XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 8), name)"
-          new_assertion = "XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 12), name)"
-          if old_assertion not in tests:
-              raise SystemExit("Built-in heading assertion not found")
-          tests = tests.replace(old_assertion, new_assertion, 1)
-          tests, count = re.subn(
-              r'\n    private func installedPocketAppButton\(named name: String, in app: XCUIApplication\) -> XCUIElement \{.*?\n    \}\n',
-              '\n',
-              tests,
-              count=1,
-              flags=re.DOTALL
-          )
-          if count != 1:
-              raise SystemExit(f"Installed button helper removal count was {count}")
-          tests_path.write_text(tests)
+          tests = Path("PocketKernelUITests/PocketKernelUITests.swift").read_text()
+          if "installedPocketAppButton" in tests:
+              raise SystemExit("obsolete lazy-list installed-row query still exists")
+          if "waitForExistence(timeout: 12), name" not in tests:
+              raise SystemExit("built-in open assertion is missing")
           PY
 
-          git add PocketKernel/App/AppEnvironment.swift PocketKernel/Shell/RootTabView.swift PocketKernelUITests/PocketKernelUITests.swift
+          git add PocketKernel/App/AppEnvironment.swift
           if ! git diff --cached --quiet; then
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git commit -m "fix: eliminate final UI presentation races [skip ci]"
+            git commit -m "fix: open built-in apps after installation [skip ci]"
             git push origin HEAD:"${{ github.head_ref }}"
           fi
 
