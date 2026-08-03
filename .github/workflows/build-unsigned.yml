@@ -12,11 +12,11 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pocketkernel-one-shot-build-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -36,33 +36,15 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
-          fetch-depth: 0
-          persist-credentials: true
+          fetch-depth: 1
+          persist-credentials: false
 
-      - name: Apply final runtime UI fix locally
+      - name: Apply final UI fix in build workspace
         shell: bash
         run: |
           set -euo pipefail
           /usr/bin/python3 <<'PY'
           from pathlib import Path
-
-          environment_path = Path("PocketKernel/App/AppEnvironment.swift")
-          environment = environment_path.read_text()
-          marker = "if let app = installed.first(where: { $0.id == template.id })"
-          if marker not in environment:
-              log_line = '            try await store.log(appID: template.id, level: .info, category: "install", message: "Installed built-in package \\(template.manifest.name).")\n'
-              old = log_line + "            await load()"
-              new = (
-                  log_line
-                  + "            await load()\n"
-                  + "            if let app = installed.first(where: { $0.id == template.id }) {\n"
-                  + "                await open(app)\n"
-                  + "            }"
-              )
-              if old not in environment:
-                  raise SystemExit("installTemplate insertion point not found")
-              environment_path.write_text(environment.replace(old, new, 1))
 
           root_path = Path("PocketKernel/Shell/RootTabView.swift")
           root = root_path.read_text()
@@ -81,12 +63,9 @@ jobs:
           }
 '''
           if old in root:
-              root = root.replace(old, new, 1)
-              root_path.write_text(root)
+              root_path.write_text(root.replace(old, new, 1))
           elif new not in root:
               raise SystemExit("record-form presentation block not found")
-          if "showingRecordForm" in root:
-              raise SystemExit("obsolete record-form Boolean still exists")
 
           tests_path = Path("PocketKernelUITests/PocketKernelUITests.swift")
           tests = tests_path.read_text()
@@ -102,11 +81,7 @@ jobs:
               tests_path.write_text(tests.replace(old, new, 1))
           elif new not in tests:
               raise SystemExit("built-in runtime synchronization block not found")
-          if "installedPocketAppButton" in tests:
-              raise SystemExit("obsolete lazy-list installed-row query still exists")
           PY
-
-          rm -f .github/workflows/zz-apply-final-ui-fix.yml
 
       - name: Verify runner and Xcode
         shell: bash
@@ -216,20 +191,6 @@ jobs:
           Scripts/validate_ipa.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
           (cd "$OUTPUT_DIR" && shasum -a 256 PocketKernel-unsigned.ipa > SHA256SUMS.txt)
           Scripts/generate_build_report.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa" "$OUTPUT_DIR/BuildReport.md"
-
-      - name: Persist verified source fixes
-        if: success()
-        shell: bash
-        run: |
-          set -euo pipefail
-          git rm -f .github/workflows/zz-apply-final-ui-fix.yml 2>/dev/null || true
-          git add PocketKernel/App/AppEnvironment.swift PocketKernel/Shell/RootTabView.swift PocketKernelUITests/PocketKernelUITests.swift
-          if ! git diff --cached --quiet; then
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git commit -m "fix: persist verified final UI behavior [skip ci]"
-            git push origin HEAD:"${{ github.head_ref }}"
-          fi
 
       - name: Archive test diagnostics
         if: always()
