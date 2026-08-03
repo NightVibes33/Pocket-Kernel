@@ -42,8 +42,8 @@ struct PackageCodec: Sendable {
     func decode(_ data: Data) throws -> PocketPackage {
         guard data.count <= PocketLimits.packageBytes else { throw PackageError.oversized }
 
-        let canonicalManifest: Data
-        do { canonicalManifest = try canonicalManifestJSON(in: data) }
+        let rawCanonicalManifest: Data
+        do { rawCanonicalManifest = try rawManifestJSON(in: data) }
         catch { throw PackageError.malformed }
 
         var package: PocketPackage
@@ -53,7 +53,11 @@ struct PackageCodec: Sendable {
         guard package.formatVersion == 1, package.integrity.algorithm == "sha256" else {
             throw PackageError.malformed
         }
-        guard sha256(canonicalManifest) == package.integrity.manifestHash.lowercased() else {
+        let incomingHash = package.integrity.manifestHash.lowercased()
+        let normalizedIntegrity = try integrity(for: package.manifest)
+        guard incomingHash == sha256(rawCanonicalManifest)
+            || incomingHash == normalizedIntegrity.manifestHash
+        else {
             throw PackageError.invalidHash
         }
 
@@ -78,15 +82,15 @@ struct PackageCodec: Sendable {
         let issues = ManifestValidator().validate(package.manifest).filter { $0.severity == .error }
         guard issues.isEmpty else { throw PackageError.invalidManifest(issues) }
 
-        package.integrity = try integrity(for: package.manifest)
+        package.integrity = normalizedIntegrity
         return package
     }
 
-    private func canonicalManifestJSON(in packageData: Data) throws -> Data {
+    private func rawManifestJSON(in packageData: Data) throws -> Data {
         guard let package = try JSONSerialization.jsonObject(with: packageData) as? [String: Any],
               let manifest = package["manifest"]
         else { throw PackageError.malformed }
-        return try canonicalManifestJSON(manifest)
+        return try canonicalJSON(manifest)
     }
 
     private func canonicalManifestJSON(_ object: Any) throws -> Data {
