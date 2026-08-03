@@ -41,12 +41,6 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Apply direct runtime form architecture
-        shell: bash
-        run: |
-          set -euo pipefail
-          /usr/bin/python3 Scripts/patch_runtime_form_ci.py
-
       - name: Verify runner and Xcode
         shell: bash
         run: |
