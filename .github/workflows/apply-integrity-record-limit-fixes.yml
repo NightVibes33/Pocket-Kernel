@@ -1,0 +1,106 @@
+name: Apply Integrity and Record Limit Fixes
+
+on:
+  push:
+    branches: [pocketkernel-1.0-full-rebuild]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+      - name: Apply deterministic integrity and valid-record limit fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          codec = Path('PocketKernel/Packages/PackageCodec.swift')
+          source = codec.read_text()
+          if 'import CoreFoundation\n' not in source:
+              source = source.replace('import CryptoKit\n', 'import CryptoKit\nimport CoreFoundation\n', 1)
+
+          old_canonical = '''    private func canonicalJSON(_ object: Any) throws -> Data {
+              guard JSONSerialization.isValidJSONObject(object) else { throw PackageError.malformed }
+              return try JSONSerialization.data(
+                  withJSONObject: object,
+                  options: [.sortedKeys, .withoutEscapingSlashes]
+              )
+          }
+'''
+          new_canonical = '''    private func canonicalJSON(_ object: Any) throws -> Data {
+              let normalized = try normalizeJSON(object)
+              guard JSONSerialization.isValidJSONObject(normalized) else { throw PackageError.malformed }
+              return try JSONSerialization.data(
+                  withJSONObject: normalized,
+                  options: [.sortedKeys, .withoutEscapingSlashes]
+              )
+          }
+
+          private func normalizeJSON(_ object: Any) throws -> Any {
+              switch object {
+              case let dictionary as [String: Any]:
+                  return try dictionary.mapValues(normalizeJSON)
+              case let array as [Any]:
+                  return try array.map(normalizeJSON)
+              case let number as NSNumber:
+                  if CFGetTypeID(number) == CFBooleanGetTypeID() { return number }
+                  let value = number.doubleValue
+                  guard value.isFinite else { throw PackageError.malformed }
+                  let maximumSafeInteger = 9_007_199_254_740_991.0
+                  if value.rounded(.towardZero) == value, abs(value) <= maximumSafeInteger {
+                      return NSNumber(value: Int64(value))
+                  }
+                  return number
+              case is NSNull:
+                  return object
+              case is String:
+                  return object
+              default:
+                  throw PackageError.malformed
+              }
+          }
+'''
+          if old_canonical not in source:
+              raise SystemExit('PackageCodec canonical JSON anchor not found')
+          codec.write_text(source.replace(old_canonical, new_canonical, 1))
+
+          store = Path('PocketKernel/Persistence/PocketStore.swift')
+          source = store.read_text()
+          old_count = '''    func save(record: PocketRecord, appID: UUID) throws {
+              var count: OpaquePointer?
+              try prepare("SELECT COUNT(*) FROM records WHERE app_id=? AND collection_id=? AND record_id<>?", into: &count)
+              defer { sqlite3_finalize(count) }
+              bind(appID.uuidString, count, 1)
+              bind(record.collectionID, count, 2)
+              bind(record.id.uuidString, count, 3)
+              guard sqlite3_step(count) == SQLITE_ROW, sqlite3_column_int(count, 0) < recordLimit else { throw StoreError.limit }
+              let data = try encoder.encode(record)
+'''
+          new_count = '''    func save(record: PocketRecord, appID: UUID) throws {
+              let validRecordCount = try records(appID: appID, collectionID: record.collectionID)
+                  .lazy
+                  .filter { $0.id != record.id }
+                  .count
+              guard validRecordCount < recordLimit else { throw StoreError.limit }
+              let data = try encoder.encode(record)
+'''
+          if old_count not in source:
+              raise SystemExit('PocketStore record count anchor not found')
+          store.write_text(source.replace(old_count, new_count, 1))
+
+          Path('.github/workflows/apply-integrity-record-limit-fixes.yml').unlink()
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PocketKernel/Packages/PackageCodec.swift PocketKernel/Persistence/PocketStore.swift .github/workflows/apply-integrity-record-limit-fixes.yml
+          git commit -m 'Normalize package numbers and ignore corrupt rows in limits'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
