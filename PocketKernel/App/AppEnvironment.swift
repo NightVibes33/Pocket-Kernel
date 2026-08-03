@@ -42,6 +42,7 @@ enum ModelAvailabilityState: Sendable, Equatable {
     var previousDraft: MicroAppManifest?
     var validationIssues: [ValidationIssue] = []
     var generationError: String?
+    var installStatus: String?
     var isGenerating = false
     var lastExportedPackage: Data?
 
@@ -204,10 +205,12 @@ enum ModelAvailabilityState: Sendable, Equatable {
 
     func installTemplate(_ template: BundledTemplate) async {
         guard let store else { return }
+        installStatus = nil
         do {
             try await store.install(template.package)
             try await store.log(appID: template.id, level: .info, category: "install", message: "Installed built-in package \(template.manifest.name).")
             await load()
+            installStatus = "Installed \(template.manifest.name)."
         } catch { startupError = error.localizedDescription }
     }
 

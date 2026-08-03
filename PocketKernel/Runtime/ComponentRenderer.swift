@@ -154,6 +154,10 @@ struct ComponentRenderer: View {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(collection.fields) { field in fieldEditor(field) }
                 ForEach(component.children) { childRenderer($0) }
+                if let actionID = component.actionID {
+                    Button("Save") { runAction(actionID) }
+                        .buttonStyle(.borderedProminent)
+                }
             }
         } else {
             VStack(alignment: .leading, spacing: 12) { ForEach(component.children) { childRenderer($0) } }

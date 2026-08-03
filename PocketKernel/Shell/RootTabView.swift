@@ -448,6 +448,12 @@ private struct LibraryView: View {
     var body: some View {
         NavigationStack {
             List {
+                if let installStatus = environment.installStatus {
+                    Section {
+                        Label(installStatus, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
                 Section("Installed") {
                     if environment.installed.isEmpty {
                         ContentUnavailableView("No Installed Apps", systemImage: "square.grid.2x2", description: Text("Install a built-in app, generate an app, or import a .pocketapp file."))
@@ -464,6 +470,7 @@ private struct LibraryView: View {
                                 }
                             } icon: { Image(systemName: template.manifest.icon.symbol) }
                         }
+                        .accessibilityIdentifier("template-app-\(template.manifest.name)")
                     }
                 }
             }
@@ -493,6 +500,7 @@ private struct LibraryView: View {
             } icon: { Image(systemName: app.manifest.icon.symbol) }
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("installed-app-\(app.manifest.name)")
         .swipeActions {
             Button(role: .destructive) { Task { await environment.delete(app.id) } } label: { Label("Delete", systemImage: "trash") }
             Button { Task { await environment.toggleFavorite(app) } } label: { Label(app.favorite ? "Unfavorite" : "Favorite", systemImage: app.favorite ? "star.slash" : "star") }.tint(.yellow)
@@ -760,10 +768,28 @@ struct RuntimeView: View {
            let target = action.target,
            let collection = manifest.collections.first(where: { $0.id == target }) {
             formValues = Dictionary(uniqueKeysWithValues: collection.fields.map { ($0.id, $0.defaultValue) })
+            if screen.map({ containsRecordForm($0.components, actionID: id) }) == true {
+                execute(id, form: [:])
+                return
+            }
+            if let formScreen = manifest.screens.first(where: { containsRecordForm($0.components, actionID: id) }) {
+                for field in collection.fields {
+                    runtimeValues["form.\(field.id)"] = field.defaultValue
+                }
+                selectedScreenID = formScreen.id
+                return
+            }
             editingCollection = collection
             return
         }
         execute(id, form: [:])
+    }
+
+    private func containsRecordForm(_ components: [ComponentSpec], actionID: String) -> Bool {
+        components.contains { component in
+            (component.kind == .recordForm && component.actionID == actionID)
+                || containsRecordForm(component.children, actionID: actionID)
+        }
     }
 
     private func execute(_ id: String, form: [String: PocketValue]) {

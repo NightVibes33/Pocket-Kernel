@@ -22,16 +22,10 @@ import XCTest
         ]
 
         for name in ["Task Board", "Habit Tracker", "Quick Journal", "Inventory List", "Service Log"] {
-            let installButton = lastPocketAppButton(named: name, in: app)
+            let installButton = templatePocketAppButton(named: name, in: app)
             scrollToElement(installButton, app: app, timeout: 12)
             tap(installButton, timeout: 10)
-
-            tap(app.tabBars.buttons["Activity"], timeout: 5)
-            XCTAssertTrue(
-                app.staticTexts["Installed built-in package \(name)."].waitForExistence(timeout: 15),
-                name
-            )
-            tap(app.tabBars.buttons["Library"], timeout: 5)
+            XCTAssertTrue(app.staticTexts["Installed \(name)."].waitForExistence(timeout: 15), name)
 
             let installedButton = installedPocketAppButton(named: name, in: app)
             scrollToElement(installedButton, app: app, timeout: 15, direction: .down)
@@ -137,19 +131,12 @@ import XCTest
         return app
     }
 
-    private func pocketAppButtons(named name: String, in app: XCUIApplication) -> XCUIElementQuery {
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", name))
-    }
-
     private func installedPocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH[c] %@ AND label CONTAINS[c] %@", name, "v1 •")
-        ).firstMatch
+        app.buttons["installed-app-\(name)"]
     }
 
-    private func lastPocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
-        let query = pocketAppButtons(named: name, in: app)
-        return query.element(boundBy: max(query.count - 1, 0))
+    private func templatePocketAppButton(named name: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons["template-app-\(name)"]
     }
 
     private func dismissRecoveryIfNeeded(_ app: XCUIApplication) {
