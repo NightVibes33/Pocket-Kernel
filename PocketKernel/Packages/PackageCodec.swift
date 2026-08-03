@@ -1,4 +1,5 @@
 import CryptoKit
+import CoreFoundation
 import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
@@ -90,11 +91,36 @@ struct PackageCodec: Sendable {
     }
 
     private func canonicalJSON(_ object: Any) throws -> Data {
-        guard JSONSerialization.isValidJSONObject(object) else { throw PackageError.malformed }
+        let normalized = try normalizeJSON(object)
+        guard JSONSerialization.isValidJSONObject(normalized) else { throw PackageError.malformed }
         return try JSONSerialization.data(
-            withJSONObject: object,
+            withJSONObject: normalized,
             options: [.sortedKeys, .withoutEscapingSlashes]
         )
+    }
+
+    private func normalizeJSON(_ object: Any) throws -> Any {
+        switch object {
+        case let dictionary as [String: Any]:
+            return try dictionary.mapValues(normalizeJSON)
+        case let array as [Any]:
+            return try array.map(normalizeJSON)
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return number }
+            let value = number.doubleValue
+            guard value.isFinite else { throw PackageError.malformed }
+            let maximumSafeInteger = 9_007_199_254_740_991.0
+            if value.rounded(.towardZero) == value, abs(value) <= maximumSafeInteger {
+                return NSNumber(value: Int64(value))
+            }
+            return number
+        case is NSNull:
+            return object
+        case is String:
+            return object
+        default:
+            throw PackageError.malformed
+        }
     }
 
     private func sha256(_ data: Data) -> String {
