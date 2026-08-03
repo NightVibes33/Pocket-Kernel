@@ -29,7 +29,8 @@ struct PackageCodec: Sendable {
 
     func integrity(for manifest: MicroAppManifest) throws -> PackageIntegrity {
         let encoded = try makeEncoder().encode(manifest)
-        return .init(manifestHash: sha256(try canonicalJSON(encoded)))
+        let object = try JSONSerialization.jsonObject(with: encoded)
+        return .init(manifestHash: sha256(try canonicalManifestJSON(object)))
     }
 
     func encode(_ package: PocketPackage) throws -> Data {
@@ -85,6 +86,18 @@ struct PackageCodec: Sendable {
         guard let package = try JSONSerialization.jsonObject(with: packageData) as? [String: Any],
               let manifest = package["manifest"]
         else { throw PackageError.malformed }
+        return try canonicalManifestJSON(manifest)
+    }
+
+    private func canonicalManifestJSON(_ object: Any) throws -> Data {
+        guard var manifest = object as? [String: Any] else { throw PackageError.malformed }
+        if let values = manifest["capabilities"] as? [Any] {
+            let capabilities = try values.map { value -> String in
+                guard let capability = value as? String else { throw PackageError.malformed }
+                return capability
+            }
+            manifest["capabilities"] = capabilities.sorted()
+        }
         return try canonicalJSON(manifest)
     }
 
