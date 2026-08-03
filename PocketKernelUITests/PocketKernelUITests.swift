@@ -53,6 +53,10 @@ import XCTest
         service.typeText("Oil Change")
         tap(app.buttons["Save"], timeout: 5)
 
+        let committedRecord = app.descendants(matching: .any)["record-field-serviceType"]
+        XCTAssertTrue(committedRecord.waitForExistence(timeout: 15))
+        XCTAssertTrue(committedRecord.label.localizedCaseInsensitiveContains("Oil Change"))
+
         app.terminate()
         let persisted = launch(startTab: "library")
         dismissRecoveryIfNeeded(persisted)
