@@ -66,20 +66,22 @@ jobs:
 
           root_path = Path("PocketKernel/Shell/RootTabView.swift")
           root = root_path.read_text()
-          old = '''        .fullScreenCover(item: $editingCollection) { collection in
-              recordForm(collection)
-          }
-'''
-          new = '''        .overlay {
-              if let collection = editingCollection {
-                  recordForm(collection)
-                      .frame(maxWidth: .infinity, maxHeight: .infinity)
-                      .background(.background)
-                      .ignoresSafeArea()
-                      .zIndex(1)
-              }
-          }
-'''
+          old = (
+              "        .fullScreenCover(item: $editingCollection) { collection in\n"
+              "            recordForm(collection)\n"
+              "        }\n"
+          )
+          new = (
+              "        .overlay {\n"
+              "            if let collection = editingCollection {\n"
+              "                recordForm(collection)\n"
+              "                    .frame(maxWidth: .infinity, maxHeight: .infinity)\n"
+              "                    .background(.background)\n"
+              "                    .ignoresSafeArea()\n"
+              "                    .zIndex(1)\n"
+              "            }\n"
+              "        }\n"
+          )
           if old in root:
               root_path.write_text(root.replace(old, new, 1))
           elif new not in root:
