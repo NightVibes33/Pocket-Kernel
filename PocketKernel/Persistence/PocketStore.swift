@@ -204,13 +204,11 @@ actor PocketStore {
     }
 
     func save(record: PocketRecord, appID: UUID) throws {
-        var count: OpaquePointer?
-        try prepare("SELECT COUNT(*) FROM records WHERE app_id=? AND collection_id=? AND record_id<>?", into: &count)
-        defer { sqlite3_finalize(count) }
-        bind(appID.uuidString, count, 1)
-        bind(record.collectionID, count, 2)
-        bind(record.id.uuidString, count, 3)
-        guard sqlite3_step(count) == SQLITE_ROW, sqlite3_column_int(count, 0) < recordLimit else { throw StoreError.limit }
+        let validRecordCount = try records(appID: appID, collectionID: record.collectionID)
+            .lazy
+            .filter { $0.id != record.id }
+            .count
+        guard validRecordCount < recordLimit else { throw StoreError.limit }
         let data = try encoder.encode(record)
         try execute("INSERT OR REPLACE INTO records(app_id,collection_id,record_id,payload,created_at,updated_at) VALUES(?,?,?,?,?,?)", bindings: [
             .text(appID.uuidString), .text(record.collectionID), .text(record.id.uuidString), .data(data),
