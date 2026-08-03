@@ -25,8 +25,10 @@ import XCTest
             let installButton = lastPocketAppButton(named: name, in: app)
             scrollToElement(installButton, app: app, timeout: 10)
             tap(installButton, timeout: 10)
-            XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.waitForExistence(timeout: 12), name)
-            tap(app.buttons["Done"], timeout: 5)
+            let done = app.buttons["Done"]
+            XCTAssertTrue(done.waitForExistence(timeout: 15), name)
+            XCTAssertTrue(app.staticTexts[expectedHeadings[name] ?? name].firstMatch.exists, name)
+            tap(done)
         }
     }
 
