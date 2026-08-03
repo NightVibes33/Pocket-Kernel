@@ -6,7 +6,9 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 unzip -q "$IPA" -d "$WORK_DIR"
 unzip -t "$IPA" >/dev/null
-mapfile -t APPS < <(find "$WORK_DIR/Payload" -mindepth 1 -maxdepth 1 -type d -name '*.app')
+shopt -s nullglob
+APPS=("$WORK_DIR"/Payload/*.app)
+shopt -u nullglob
 [ "${#APPS[@]}" -eq 1 ] || { echo "Expected exactly one app in Payload" >&2; exit 1; }
 APP="${APPS[0]}"
 EXECUTABLE="$APP/PocketKernel"
