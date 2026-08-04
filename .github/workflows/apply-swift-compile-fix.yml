@@ -25,45 +25,64 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(path: Path, old: str, new: str) -> None:
-              text = path.read_text()
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f"Expected exactly one match in {path} but found {count}: {old!r}")
-              path.write_text(text.replace(old, new, 1))
+                  raise SystemExit(f"Expected exactly one {label} match but found {count}: {old!r}")
+              return text.replace(old, new, 1)
 
-          views = Path("PocketKernel/UI/Views.swift")
-          replace_once(
+          views_path = Path("PocketKernel/UI/Views.swift")
+          views = views_path.read_text()
+          views = replace_once(
               views,
               "struct ProfileView: View {\n    @EnvironmentObject private var chat: ChatController\n    @EnvironmentObject private var oauth: OAuthCoordinator\n",
               "struct ProfileView: View {\n    @EnvironmentObject private var chat: ChatController\n    @EnvironmentObject private var oauth: OAuthCoordinator\n    @EnvironmentObject private var account: AccountController\n",
+              "ProfileView account environment",
           )
+          views_path.write_text(views)
 
-          entry = Path("PocketKernel/App/EntryExperience.swift")
+          entry_path = Path("PocketKernel/App/EntryExperience.swift")
+          entry = entry_path.read_text()
           replacements = [
               (
                   "Task { await signInWithApple(token: token, nonce: nonce, name: name, email: credential.email) }",
                   "Task { await self.signInWithApple(token: token, nonce: nonce, name: name, email: credential.email) }",
+                  "Apple task capture",
               ),
               (
-                  "let ticket = try await openAuthenticationSession(url: url)\n            profile = try await AccountAPI.shared.exchangeGoogleTicket(ticket)",
-                  "let ticket = try await self.openAuthenticationSession(url: url)\n            self.profile = try await AccountAPI.shared.exchangeGoogleTicket(ticket)",
+                  "let ticket = try await openAuthenticationSession(url: url)",
+                  "let ticket = try await self.openAuthenticationSession(url: url)",
+                  "Google web session capture",
               ),
               (
-                  "_ = try await AccountAPI.shared.startEmail(normalized)\n            emailAwaitingCode = normalized",
-                  "_ = try await AccountAPI.shared.startEmail(normalized)\n            self.emailAwaitingCode = normalized",
+                  "profile = try await AccountAPI.shared.exchangeGoogleTicket(ticket)",
+                  "self.profile = try await AccountAPI.shared.exchangeGoogleTicket(ticket)",
+                  "Google profile capture",
               ),
               (
-                  "profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)\n            emailAwaitingCode = nil",
+                  "emailAwaitingCode = normalized",
+                  "self.emailAwaitingCode = normalized",
+                  "email start capture",
+              ),
+              (
+                  "profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)",
+                  "self.profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)",
+                  "email verification profile capture",
+              ),
+              (
+                  "self.profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)\n            emailAwaitingCode = nil",
                   "self.profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)\n            self.emailAwaitingCode = nil",
+                  "email verification state capture",
               ),
               (
                   "profile = try await AccountAPI.shared.signInWithApple(identityToken: token, nonce: nonce, name: name, email: email)",
                   "self.profile = try await AccountAPI.shared.signInWithApple(identityToken: token, nonce: nonce, name: name, email: email)",
+                  "Apple profile capture",
               ),
           ]
-          for old, new in replacements:
-              replace_once(entry, old, new)
+          for old, new, label in replacements:
+              entry = replace_once(entry, old, new, label)
+          entry_path.write_text(entry)
           PY
 
           rm .github/workflows/apply-swift-compile-fix.yml
