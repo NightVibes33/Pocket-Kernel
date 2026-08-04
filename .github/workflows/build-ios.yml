@@ -20,6 +20,83 @@ jobs:
       OUTPUT_DIR: ${{ github.workspace }}/output
     steps:
       - uses: actions/checkout@v5
+      - name: Apply confirmed Swift 6 source fixes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          views_path = Path("PocketKernel/UI/Views.swift")
+          views = views_path.read_text()
+          old_profile = """struct ProfileView: View {
+              @EnvironmentObject private var chat: ChatController
+              @EnvironmentObject private var oauth: OAuthCoordinator
+          """
+          new_profile = """struct ProfileView: View {
+              @EnvironmentObject private var chat: ChatController
+              @EnvironmentObject private var oauth: OAuthCoordinator
+              @EnvironmentObject private var account: AccountController
+          """
+          if old_profile in views:
+              views = views.replace(old_profile, new_profile, 1)
+              views_path.write_text(views)
+          elif new_profile not in views:
+              raise SystemExit("ProfileView account injection anchor not found")
+
+          entry_path = Path("PocketKernel/App/EntryExperience.swift")
+          entry = entry_path.read_text()
+          replacements = {
+              """        await runBusy {
+                      let url = try await AccountAPI.shared.googleAuthorizationURL()
+                      let ticket = try await openAuthenticationSession(url: url)
+                      profile = try await AccountAPI.shared.exchangeGoogleTicket(ticket)
+                  }
+          """: """        await runBusy {
+                      let url = try await AccountAPI.shared.googleAuthorizationURL()
+                      let ticket = try await self.openAuthenticationSession(url: url)
+                      self.profile = try await AccountAPI.shared.exchangeGoogleTicket(ticket)
+                  }
+          """,
+              """        await runBusy {
+                      _ = try await AccountAPI.shared.startEmail(normalized)
+                      emailAwaitingCode = normalized
+                  }
+          """: """        await runBusy {
+                      _ = try await AccountAPI.shared.startEmail(normalized)
+                      self.emailAwaitingCode = normalized
+                  }
+          """,
+              """        await runBusy {
+                      profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)
+                      emailAwaitingCode = nil
+                  }
+          """: """        await runBusy {
+                      self.profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)
+                      self.emailAwaitingCode = nil
+                  }
+          """,
+              """        await runBusy {
+                      profile = try await AccountAPI.shared.signInWithApple(identityToken: token, nonce: nonce, name: name, email: email)
+                  }
+          """: """        await runBusy {
+                      self.profile = try await AccountAPI.shared.signInWithApple(identityToken: token, nonce: nonce, name: name, email: email)
+                  }
+          """,
+          }
+          for old, new in replacements.items():
+              if old in entry:
+                  entry = entry.replace(old, new, 1)
+              elif new not in entry:
+                  raise SystemExit("EntryExperience Swift 6 anchor not found")
+          entry_path.write_text(entry)
+          PY
+          if ! git diff --quiet -- PocketKernel/UI/Views.swift PocketKernel/App/EntryExperience.swift; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add PocketKernel/UI/Views.swift PocketKernel/App/EntryExperience.swift
+            git commit -m "fix: satisfy Swift 6 account and closure isolation"
+            git push origin HEAD:product/app-store-ready
+          fi
       - name: Verify toolchain
         run: |
           set -euo pipefail
