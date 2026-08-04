@@ -1,45 +1,85 @@
 import XCTest
 
-@MainActor final class PocketKernelUITests: XCTestCase {
-    func testOneShotMockGenerationRecordPersistenceExportAndDelete() {
-        let app = XCUIApplication(); app.launchArguments = ["-PKUITesting", "1", "-PKResetDatabase", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "create"]; app.launch()
-        tapCenter(app.buttons["Generate on device"], timeout: 10)
-        let install = app.buttons["Install Service Log"]
-        scrollToElement(install, in: app, timeout: 15)
-        tapCenter(install)
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: install); waitForExpectations(timeout: 10)
-        app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
-        let installedServiceLog = app.buttons["Service Log, Track maintenance and upcoming service"]
-        tapCenter(installedServiceLog, timeout: 10)
-        let addService = app.buttons["Add Service"]
-        XCTAssertTrue(addService.waitForExistence(timeout: 5)); addService.tap()
-        let mileage = app.textFields["Mileage"]
-        XCTAssertTrue(mileage.waitForExistence(timeout: 10)); mileage.tap(); mileage.typeText("42000")
-        let save = app.buttons["Save"]
-        XCTAssertTrue(save.waitForExistence(timeout: 5)); save.tap()
-        app.terminate(); app.launchArguments = ["-PKUITesting", "1", "-PKModelMode", "mock", "-PKDisableAnimations", "1", "-PKStartTab", "library"]; app.launch()
-        if app.buttons["Continue Safely"].waitForExistence(timeout: 2) { tapCenter(app.buttons["Continue Safely"]) }
-        tapCenter(app.buttons["Service Log, Track maintenance and upcoming service"], timeout: 10)
-        let persistedMileage = app.descendants(matching: .any)["record-field-mileage"]
-        XCTAssertTrue(persistedMileage.waitForExistence(timeout: 5))
-        XCTAssertTrue(persistedMileage.label.contains("42000"))
+@MainActor
+final class PocketKernelUITests: XCTestCase {
+    func testOnboardingExplainsAutomationProduct() {
+        let app = launch(uiTesting: false, reset: true, resetOnboarding: true)
+        XCTAssertTrue(app.staticTexts["PocketKernel"].waitForExistence(timeout: 12))
+        let productDescription = app.staticTexts.matching(NSPredicate(
+            format: "label BEGINSWITH %@",
+            "Describe work in plain English."
+        )).firstMatch
+        XCTAssertTrue(productDescription.exists)
+        scrollAndTap(app.buttons["Get Started"], in: app, timeout: 10)
+        XCTAssertTrue(app.buttons["Describe an automation"].waitForExistence(timeout: 8))
     }
 
-    private func tapCenter(_ element: XCUIElement, timeout: TimeInterval = 5) {
-        XCTAssertTrue(element.waitForExistence(timeout: timeout))
-        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    func testBuildReviewSaveAndPersistTypedWorkflow() {
+        let prompt = "Every weekday at 8 AM, summarize unread customer emails and post the digest to Slack"
+        let app = launch(startTab: "create", reset: true)
+        scrollAndTap(app.buttons[prompt], in: app, timeout: 12)
+        scrollAndTap(app.buttons["Build workflow"], in: app, timeout: 12)
+
+        XCTAssertTrue(app.navigationBars["Review"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Workflow"].exists)
+        XCTAssertTrue(app.staticTexts["Gmail · searchMessages"].exists)
+        XCTAssertTrue(app.staticTexts["Apple Intelligence · summarize"].exists)
+        XCTAssertTrue(app.staticTexts["Slack · postMessage"].exists)
+        XCTAssertTrue(app.staticTexts["Approval required"].exists)
+        scrollAndTap(app.buttons["Save automation"], in: app, timeout: 12)
+
+        tap(app.tabBars.buttons["Automations"], timeout: 8)
+        XCTAssertTrue(app.staticTexts[prompt].waitForExistence(timeout: 10))
+
+        app.terminate()
+        let relaunched = launch(startTab: "automations")
+        XCTAssertTrue(relaunched.staticTexts[prompt].waitForExistence(timeout: 10))
     }
 
-    private func scrollToElement(_ element: XCUIElement, in app: XCUIApplication, timeout: TimeInterval) {
+    func testOAuthConnectionIsNeverFaked() {
+        let app = launch(startTab: "connections", reset: true)
+        tap(app.buttons["Gmail"], timeout: 10)
+        XCTAssertTrue(app.staticTexts["OAuth service not configured"].waitForExistence(timeout: 8))
+        let connect = app.buttons["Connect Gmail"]
+        XCTAssertTrue(connect.exists)
+        XCTAssertFalse(connect.isEnabled)
+    }
+
+    private func launch(
+        startTab: String? = nil,
+        uiTesting: Bool = true,
+        reset: Bool = false,
+        resetOnboarding: Bool = false
+    ) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["-PKModelMode", "mock", "-PKDisableAnimations", "1"]
+        if uiTesting { app.launchArguments += ["-PKUITesting", "1"] }
+        if let startTab { app.launchArguments += ["-PKStartTab", startTab] }
+        if reset { app.launchArguments += ["-PKResetDatabase", "1"] }
+        if resetOnboarding { app.launchArguments += ["-PKResetOnboarding", "1"] }
+        app.launch()
+        return app
+    }
+
+    private func scrollAndTap(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval
+    ) {
         let deadline = Date().addingTimeInterval(timeout)
-        while !element.exists, Date() < deadline {
+        while Date() < deadline {
+            if element.waitForExistence(timeout: 0.5), element.isHittable {
+                element.tap()
+                return
+            }
             app.swipeUp()
         }
-        XCTAssertTrue(element.exists)
+        XCTFail("Element did not become hittable: \(element)")
     }
 
-    func testRecoveryFixtureAppears() {
-        let app = XCUIApplication(); app.launchArguments = ["-PKUITesting", "1", "-PKRecoveryFixture", "1", "-PKModelMode", "mock"]; app.launch()
-        XCTAssertTrue(app.staticTexts["PocketKernel recovered from an interrupted session"].waitForExistence(timeout: 5))
+    private func tap(_ element: XCUIElement, timeout: TimeInterval = 5) {
+        XCTAssertTrue(element.waitForExistence(timeout: timeout), "Missing element: \(element)")
+        // A direct tap lets XCUITest perform its own visibility adjustment when isHittable briefly reports a false negative.
+        element.tap()
     }
 }

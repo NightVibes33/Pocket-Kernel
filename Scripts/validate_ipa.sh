@@ -1,15 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ipa="${1:?Missing IPA path}"; work_dir="$(mktemp -d)"; trap 'rm -rf "$work_dir"' EXIT
-unzip -q "$ipa" -d "$work_dir"; unzip -t "$ipa" >/dev/null
-app_count="$(find "$work_dir/Payload" -mindepth 1 -maxdepth 1 -type d -name '*.app' | wc -l | tr -d ' ')"
-test "$app_count" -eq 1; app="$(find "$work_dir/Payload" -mindepth 1 -maxdepth 1 -type d -name '*.app')"; plist="$app/Info.plist"; exe="$app/PocketKernel"
-test -f "$exe"; test -f "$app/PrivacyInfo.xcprivacy"; plutil -lint "$plist"
-test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = "com.nightvibes33.pocketkernel"
-test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")" = "PocketKernel"
-test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundlePackageType' "$plist")" = "APPL"
-test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$plist")" = "26.0"
-archs="$(lipo -archs "$exe")"; grep -qw arm64 <<<"$archs"; ! grep -qw x86_64 <<<"$archs"
-! find "$app" -name embedded.mobileprovision -o -name _CodeSignature | grep -q .
-! otool -L "$exe" | grep -E '/PrivateFrameworks/|iphonesimulator'
-Scripts/validate_templates.py "$app/Templates"
+IPA="${1:?Missing IPA path}"
+test -f "$IPA"
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+unzip -q "$IPA" -d "$WORK_DIR"
+unzip -t "$IPA" >/dev/null
+shopt -s nullglob
+APPS=("$WORK_DIR"/Payload/*.app)
+shopt -u nullglob
+[ "${#APPS[@]}" -eq 1 ] || { echo "Expected exactly one app in Payload" >&2; exit 1; }
+APP="${APPS[0]}"
+EXECUTABLE="$APP/PocketKernel"
+test -f "$EXECUTABLE"
+ARCHS="$(lipo -archs "$EXECUTABLE")"
+[[ " $ARCHS " == *' arm64 '* || "$ARCHS" == 'arm64' ]]
+[[ " $ARCHS " != *x86_64* ]]
+plutil -lint "$APP/Info.plist" >/dev/null
+[ "$(plutil -extract CFBundleIdentifier raw "$APP/Info.plist")" = 'com.nightvibes33.pocketkernel' ]
+[ "$(plutil -extract CFBundleExecutable raw "$APP/Info.plist")" = 'PocketKernel' ]
+[ "$(plutil -extract CFBundlePackageType raw "$APP/Info.plist")" = 'APPL' ]
+[ "$(plutil -extract MinimumOSVersion raw "$APP/Info.plist")" = '26.0' ]
+plutil -extract CFBundleIcons xml1 -o - "$APP/Info.plist" >/dev/null
+[ ! -e "$APP/embedded.mobileprovision" ]
+[ ! -d "$APP/_CodeSignature" ]
+test -f "$APP/PrivacyInfo.xcprivacy"
+plutil -lint "$APP/PrivacyInfo.xcprivacy" >/dev/null
+plutil -extract NSPrivacyAccessedAPITypes xml1 -o - "$APP/PrivacyInfo.xcprivacy" | grep -q 'NSPrivacyAccessedAPICategoryUserDefaults'
+plutil -extract NSPrivacyAccessedAPITypes xml1 -o - "$APP/PrivacyInfo.xcprivacy" | grep -q 'CA92.1'
+test -f "$APP/Assets.car"
+if otool -L "$EXECUTABLE" | grep -q '/System/Library/PrivateFrameworks'; then
+  echo "Private framework linkage detected" >&2
+  exit 1
+fi
+while IFS= read -r binary; do
+  if file "$binary" | grep -q 'Mach-O' && lipo -archs "$binary" | grep -q 'x86_64'; then
+    echo "Simulator architecture found: $binary" >&2
+    exit 1
+  fi
+done < <(find "$APP/Frameworks" -type f 2>/dev/null || true)
+/usr/bin/python3 "$(dirname "$0")/validate_templates.py" "$APP/Templates"
+echo "Validated unsigned ARM64 PocketKernel IPA"

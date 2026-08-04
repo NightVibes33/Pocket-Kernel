@@ -1,242 +1,708 @@
-import FoundationModels
 import SwiftUI
-import UIKit
-import UniformTypeIdentifiers
 
-enum RootTab: Hashable { case home, create, library, activity, settings }
+private enum RootTab: Hashable {
+    case today, create, automations, activity, connections
+}
 
 struct RootTabView: View {
-    @Environment(AppEnvironment.self) private var environment
-    @AppStorage("PKOnboardingComplete") private var onboardingComplete = false
-    @State private var selectedTab: RootTab = .home
+    @AppStorage("PKAutomationOnboardingComplete") private var onboardingComplete = false
+    @StateObject private var workspace = PKAutomationWorkspace()
+    @State private var selectedTab: RootTab
+    @State private var forceOnboarding: Bool
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
-        let initialTab: RootTab
-        if let marker = arguments.firstIndex(of: "-PKStartTab"), arguments.indices.contains(marker + 1) {
-            initialTab = arguments[marker + 1] == "create" ? .create : arguments[marker + 1] == "library" ? .library : .home
-        } else {
-            initialTab = .home
+        let requested = Self.argumentValue("-PKStartTab", arguments: arguments)
+        let initialTab: RootTab = switch requested {
+        case "create": .create
+        case "automations": .automations
+        case "activity": .activity
+        case "connections": .connections
+        default: .today
         }
         _selectedTab = State(initialValue: initialTab)
+        _forceOnboarding = State(initialValue: arguments.contains("-PKResetOnboarding"))
     }
 
     var body: some View {
-        @Bindable var environment = environment
         TabView(selection: $selectedTab) {
-            HomeView(create: { selectedTab = .create }).tag(RootTab.home).tabItem { Label("Home", systemImage: "house.fill") }
-            CreateView().tag(RootTab.create).tabItem { Label("Create", systemImage: "sparkles") }
-            LibraryView().tag(RootTab.library).tabItem { Label("Library", systemImage: "square.grid.2x2.fill") }
-            ActivityView().tag(RootTab.activity).tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
-            SettingsView().tag(RootTab.settings).tabItem { Label("Settings", systemImage: "gearshape.fill") }
+            TodayView(create: { selectedTab = .create })
+                .tag(RootTab.today)
+                .tabItem { Label("Today", systemImage: "checklist") }
+            AutomationCreateView()
+                .tag(RootTab.create)
+                .tabItem { Label("Create", systemImage: "sparkles") }
+            AutomationsView()
+                .tag(RootTab.automations)
+                .tabItem { Label("Automations", systemImage: "point.3.connected.trianglepath.dotted") }
+            AutomationActivityView()
+                .tag(RootTab.activity)
+                .tabItem { Label("Activity", systemImage: "clock.arrow.circlepath") }
+            ConnectionsView()
+                .tag(RootTab.connections)
+                .tabItem { Label("Connections", systemImage: "link") }
         }
-        .fullScreenCover(isPresented: Binding(get: { !onboardingComplete && !ProcessInfo.processInfo.arguments.contains("-PKUITesting") }, set: { if !$0 { onboardingComplete = true } })) { OnboardingView { onboardingComplete = true } }
-        .sheet(item: $environment.pendingOpenApp) { RuntimeView(manifest: $0, store: environment.store) }
-        .confirmationDialog("PocketKernel recovered from an interrupted session", isPresented: Binding(get: { environment.lifecycle.recoveryRequired }, set: { environment.lifecycle.recoveryRequired = $0 }), titleVisibility: .visible) {
-            if let id = environment.lifecycle.affectedAppID, let app = environment.apps.first(where: { $0.id == id }) { Button("Reopen \(app.name)") { environment.pendingOpenApp = app; environment.lifecycle.resumeSession() }; Button("Export \(app.name)") { environment.pendingOpenApp = app; environment.lifecycle.dismissRecovery() }; Button("Delete \(app.name)", role: .destructive) { Task { await environment.delete(app.id); environment.lifecycle.dismissRecovery() } } }
-            Button("Continue Safely") { environment.lifecycle.dismissRecovery() }
-        } message: { Text("The last micro-app may have been closed unexpectedly. Your records were preserved.") }
+        .environmentObject(workspace)
+        .fullScreenCover(isPresented: Binding(
+            get: {
+                forceOnboarding
+                    || (!onboardingComplete && !ProcessInfo.processInfo.arguments.contains("-PKUITesting"))
+            },
+            set: {
+                if !$0 {
+                    onboardingComplete = true
+                    forceOnboarding = false
+                }
+            }
+        )) {
+            AutomationOnboardingView {
+                onboardingComplete = true
+                forceOnboarding = false
+            }
+        }
+        .alert("PocketKernel", isPresented: Binding(
+            get: { workspace.errorMessage != nil },
+            set: { if !$0 { workspace.errorMessage = nil } }
+        )) {
+            Button("OK") { workspace.errorMessage = nil }
+        } message: {
+            Text(workspace.errorMessage ?? "Unknown error")
+        }
+    }
+
+    private static func argumentValue(_ key: String, arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: key), arguments.indices.contains(index + 1) else { return nil }
+        return arguments[index + 1]
     }
 }
 
-private struct OnboardingView: View {
+private struct AutomationOnboardingView: View {
     var complete: () -> Void
+
     var body: some View {
-        NavigationStack { VStack(spacing: 24) { Spacer(); Image(systemName: "square.grid.3x3.square").font(.system(size: 72)).foregroundStyle(.tint); Text("PocketKernel").font(.largeTitle.bold()); Text("Describe small apps, preview the generated blueprint, and run them safely as native SwiftUI interfaces.").multilineTextAlignment(.center).foregroundStyle(.secondary); VStack(alignment: .leading, spacing: 12) { Label("On-device generation when Apple Intelligence is available", systemImage: "apple.intelligence"); Label("Typed actions—no downloaded code or JIT", systemImage: "checkmark.shield"); Label("Your apps and records stay on this device", systemImage: "lock.fill") }.frame(maxWidth: 420, alignment: .leading); Spacer(); Button("Get Started", action: complete).buttonStyle(.borderedProminent).controlSize(.large) }.padding(28).navigationTitle("Welcome") }
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 26) {
+                    Spacer(minLength: 40)
+                    Image(systemName: "apple.intelligence")
+                        .font(.system(size: 74, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.tint)
+                    VStack(spacing: 10) {
+                        Text("PocketKernel")
+                            .font(.largeTitle.bold())
+                        Text("Describe work in plain English. PocketKernel builds a typed automation, shows every step, asks before acting, and runs the approved workflow predictably.")
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 16) {
+                        feature("Build with Apple Intelligence", "apple.intelligence")
+                        feature("Connect real services through OAuth", "link.badge.plus")
+                        feature("Approve email, posts, events, and document changes", "checkmark.shield.fill")
+                        feature("Inspect deterministic runs and failures", "list.bullet.rectangle.portrait")
+                    }
+                    .frame(maxWidth: 520, alignment: .leading)
+                    Text("PocketKernel never sends an external action until its approval policy and service connection permit it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button("Get Started", action: complete)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                    Spacer(minLength: 20)
+                }
+                .padding(28)
+            }
+            .navigationTitle("Welcome")
+        }
+    }
+
+    private func feature(_ title: String, _ symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.headline)
     }
 }
 
-private struct HomeView: View {
-    @Environment(AppEnvironment.self) private var environment
-    @State private var search = ""
+private struct TodayView: View {
+    @EnvironmentObject private var workspace: PKAutomationWorkspace
     var create: () -> Void
-    private var filtered: [MicroAppManifest] { search.isEmpty ? environment.apps : environment.apps.filter { $0.name.localizedCaseInsensitiveContains(search) || $0.summary.localizedCaseInsensitiveContains(search) } }
+
+    private var approvals: [PKRunEvent] {
+        workspace.runs.filter { $0.state == .waitingForApproval }
+    }
+
+    private var failures: [PKRunEvent] {
+        workspace.runs.filter { $0.state == .failed }
+    }
+
+    private var scheduled: [PKAutomation] {
+        workspace.automations.filter { $0.state == .active && $0.trigger.kind != .manual }
+    }
+
     var body: some View {
-        NavigationStack { ScrollView { LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 14)], spacing: 14) { Button(action: create) { VStack(spacing: 12) { Image(systemName: "plus.circle.fill").font(.largeTitle); Text("Create App").font(.headline) }.frame(maxWidth: .infinity, minHeight: 130).background(.tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 22)) }.buttonStyle(.plain).accessibilityHint("Opens the AI and template app builder"); ForEach(filtered) { app in NavigationLink { RuntimeView(manifest: app, store: environment.store) } label: { VStack(alignment: .leading, spacing: 10) { Image(systemName: app.icon.symbol).font(.title); Text(app.name).font(.headline); Text(app.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2) }.frame(maxWidth: .infinity, minHeight: 130, alignment: .leading).padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22)) }.buttonStyle(.plain) } }.padding() }.searchable(text: $search, prompt: "Search Pocket Apps").navigationTitle("PocketKernel").toolbar { ToolbarItem(placement: .topBarTrailing) { ModelStatusLabel() } } }
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    hero
+                    if !approvals.isEmpty {
+                        section("Needs your approval", symbol: "checkmark.shield") {
+                            ForEach(approvals) { event in runCard(event) }
+                        }
+                    }
+                    if !failures.isEmpty {
+                        section("Needs attention", symbol: "exclamationmark.triangle") {
+                            ForEach(failures.prefix(5)) { event in runCard(event) }
+                        }
+                    }
+                    section("Upcoming", symbol: "calendar.badge.clock") {
+                        if scheduled.isEmpty {
+                            emptyCard("No enabled scheduled automations", "Create a schedule, event, condition, webhook, or location trigger.")
+                        } else {
+                            ForEach(scheduled) { automation in automationCard(automation) }
+                        }
+                    }
+                    section("Recent runs", symbol: "clock.arrow.circlepath") {
+                        if workspace.runs.isEmpty {
+                            emptyCard("No runs yet", "Test or enable an automation to see step-by-step results here.")
+                        } else {
+                            ForEach(workspace.runs.prefix(8)) { event in runCard(event) }
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Today")
+        }
+    }
+
+    private var hero: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("What should happen automatically?")
+                        .font(.title2.bold())
+                    Text("Create a workflow from a plain-English request.")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "apple.intelligence")
+                    .font(.title)
+                    .foregroundStyle(.tint)
+            }
+            Button(action: create) {
+                Label("Describe an automation", systemImage: "plus.circle.fill")
+                    .frame(maxWidth: .infinity, minHeight: 48)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .padding()
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
+    }
+
+    private func section<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: symbol)
+                .font(.title3.bold())
+            content()
+        }
+    }
+
+    private func runCard(_ event: PKRunEvent) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: runSymbol(event.state))
+                .foregroundStyle(runColor(event.state))
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(event.automationName).font(.headline)
+                Text(event.message).font(.subheadline).foregroundStyle(.secondary)
+                Text(event.createdAt, style: .relative).font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer()
+        }
+        .padding()
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func automationCard(_ automation: PKAutomation) -> some View {
+        HStack {
+            Image(systemName: triggerSymbol(automation.trigger.kind)).frame(width: 28)
+            VStack(alignment: .leading) {
+                Text(automation.name).font(.headline)
+                Text(triggerDescription(automation.trigger)).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("\(automation.steps.count) steps").font(.caption).foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func emptyCard(_ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.headline)
+            Text(detail).font(.subheadline).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
     }
 }
 
-private struct ModelStatusLabel: View {
-    private var available: Bool { if case .available = SystemLanguageModel.default.availability { true } else { false } }
-    var body: some View { Label(available ? "AI Ready" : "Templates Ready", systemImage: available ? "apple.intelligence" : "square.grid.2x2").font(.caption).foregroundStyle(available ? .green : .secondary).accessibilityLabel(available ? "Apple Intelligence available" : "Apple Intelligence unavailable; templates available") }
-}
+private struct AutomationCreateView: View {
+    @EnvironmentObject private var workspace: PKAutomationWorkspace
+    @State private var showingDraft = false
 
-private struct CreateView: View {
-    @Environment(AppEnvironment.self) private var environment
-    @State private var prompt = "Create a car maintenance tracker with mileage, service date, cost, notes, and next-service reminders."
-    @State private var selectedCapabilities: Set<PocketCapability> = []
-    private let suggestions = ["Habit tracker with daily streaks", "Inventory list with quantities", "Quick private journal", "Task board with status"]
+    private let examples = [
+        "Every weekday at 8 AM, summarize unread customer emails and post the digest to Slack",
+        "When an urgent Gmail arrives, draft a reply and ask me to approve it",
+        "Monitor an API price and notify me when it drops below my target",
+        "Every Friday, prepare a document from this week's calendar and Slack updates",
+        "When I arrive at work, send me today's meetings and important inbox tasks"
+    ]
+
     var body: some View {
-        @Bindable var environment = environment
-        NavigationStack { Form {
-            Section("Describe your app") { TextEditor(text: $prompt).frame(minHeight: 120).accessibilityLabel("App description"); ScrollView(.horizontal) { HStack { ForEach(suggestions, id: \.self) { suggestion in Button(suggestion) { prompt = suggestion }.buttonStyle(.bordered) } } }.scrollIndicators(.hidden) }
-            Button { Task { await environment.generate(prompt, capabilities: selectedCapabilities) } } label: { if environment.isGenerating { Label("Generating typed blueprint…", systemImage: "hourglass") } else { Label("Generate on device", systemImage: "sparkles") } }.disabled(environment.isGenerating || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Section("Capabilities") { ForEach(PocketCapability.allCases, id: \.self) { capability in Toggle(capability.rawValue, isOn: Binding(get: { selectedCapabilities.contains(capability) }, set: { enabled in if enabled { selectedCapabilities.insert(capability) } else { selectedCapabilities.remove(capability) } })) } }
-            if let error = environment.generationError { Section("Generation status") { Text(error).foregroundStyle(.secondary); Button("Retry") { Task { await environment.generate(prompt, capabilities: selectedCapabilities) } } } }
-            if let draft = environment.draft { Section("Validation") { let issues = ManifestValidator().validate(draft); if issues.isEmpty { Label("Blueprint passed every manifest gate", systemImage: "checkmark.shield.fill").foregroundStyle(.green) } else { ForEach(issues) { Label($0.message, systemImage: $0.severity == .error ? "xmark.octagon" : "exclamationmark.triangle") } } }; Section("Generated Preview") { Text("AI-generated blueprint—review before installing.").font(.caption).foregroundStyle(.secondary); RuntimeView(manifest: draft, store: nil).frame(minHeight: 320); Button("Install \(draft.name)") { Task { await environment.installDraft() } }.buttonStyle(.borderedProminent) } }
-        }.navigationTitle("Create") }
+        NavigationStack {
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Describe the outcome", systemImage: "apple.intelligence")
+                            .font(.headline)
+                        ZStack(alignment: .topLeading) {
+                            TextEditor(text: $workspace.prompt)
+                                .frame(minHeight: 150)
+                                .accessibilityLabel("Automation description")
+                            if workspace.prompt.isEmpty {
+                                Text("Example: Every weekday at 8 AM, summarize unread customer emails and post the digest to Slack.")
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 8)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                    }
+                }
+                Section("Try an example") {
+                    ForEach(examples, id: \.self) { example in
+                        Button(example) { workspace.prompt = example }
+                            .foregroundStyle(.primary)
+                    }
+                }
+                Section {
+                    Button {
+                        Task {
+                            await workspace.compilePrompt()
+                            showingDraft = workspace.draft != nil
+                        }
+                    } label: {
+                        Label("Build workflow", systemImage: "wand.and.stars")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        workspace.isWorking
+                            || workspace.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
+                } footer: {
+                    Text("The builder produces registered operations and typed inputs. It never generates executable Swift, JavaScript, shell commands, or arbitrary server code.")
+                }
+            }
+            .navigationTitle("Create")
+            .navigationDestination(isPresented: $showingDraft) {
+                if workspace.draft != nil { DraftWorkflowView() }
+            }
+        }
     }
 }
 
-private struct LibraryView: View {
-    @Environment(AppEnvironment.self) private var environment
-    @State private var importing = false
-    @State private var errorMessage: String?
-    private let templates = ["Task Board", "Habit Tracker", "Quick Journal", "Inventory List", "Service Log"]
+private struct DraftWorkflowView: View {
+    @EnvironmentObject private var workspace: PKAutomationWorkspace
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
-        NavigationStack { List {
-            Section("Installed") { if environment.apps.isEmpty { Text("No installed apps").foregroundStyle(.secondary) }; ForEach(environment.apps) { app in NavigationLink { RuntimeView(manifest: app, store: environment.store) } label: { Label { VStack(alignment: .leading) { Text(app.name); Text(app.summary).font(.caption).foregroundStyle(.secondary) } } icon: { Image(systemName: app.icon.symbol) } }.swipeActions { Button(role: .destructive) { Task { await environment.delete(app.id) } } label: { Label("Delete", systemImage: "trash") }; Button { Task { await environment.duplicate(app) } } label: { Label("Duplicate", systemImage: "plus.square.on.square") }.tint(.blue) }.contextMenu { if let data = environment.exportPackage(app) { ShareLink(item: data, preview: SharePreview("\(app.name).pocketapp")) { Label("Export Pocket App", systemImage: "square.and.arrow.up") } } } } }
-            Section("Built-in Templates") { ForEach(templates, id: \.self) { name in Button { Task { await environment.installTemplate(named: name) } } label: { Label(name, systemImage: "square.dashed") } } }
-        }.navigationTitle("Library").toolbar { Button("Import", systemImage: "square.and.arrow.down") { importing = true } }.fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in do { let url = try result.get(); guard url.startAccessingSecurityScopedResource() else { throw CocoaError(.fileReadNoPermission) }; defer { url.stopAccessingSecurityScopedResource() }; let data = try Data(contentsOf: url); Task { await environment.importPackage(data) } } catch { errorMessage = error.localizedDescription } }.alert("Import Failed", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) { Button("OK") { errorMessage = nil } } message: { Text(errorMessage ?? "Unknown import error") } }
+        Group {
+            if let draft = workspace.draft {
+                List {
+                    Section {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(draft.name).font(.title2.bold())
+                            Text(draft.summary).foregroundStyle(.secondary)
+                            Label(triggerDescription(draft.trigger), systemImage: triggerSymbol(draft.trigger.kind))
+                                .font(.subheadline)
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    if !workspace.validationIssues.isEmpty {
+                        Section("Validation") {
+                            ForEach(workspace.validationIssues) { issue in
+                                Label(issue.message, systemImage: issue.severity == .error ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                                    .foregroundStyle(issue.severity == .error ? .red : .orange)
+                            }
+                        }
+                    }
+                    Section("Workflow") {
+                        ForEach(Array(draft.steps.enumerated()), id: \.element.id) { index, step in
+                            WorkflowStepRow(number: index + 1, step: step)
+                        }
+                    }
+                    Section("Required connections") {
+                        if draft.connections.isEmpty {
+                            Label("No OAuth account is required", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        } else {
+                            ForEach(draft.connections) { connection in
+                                HStack {
+                                    Label(connection.service.title, systemImage: connection.service.symbol)
+                                    Spacer()
+                                    Text(connection.connected ? "Connected" : "Required")
+                                        .font(.caption)
+                                        .foregroundStyle(connection.connected ? .green : .orange)
+                                }
+                            }
+                        }
+                    }
+                    Section {
+                        Button("Save automation") {
+                            workspace.saveDraft()
+                            dismiss()
+                        }
+                        .disabled(workspace.validationIssues.contains { $0.severity == .error })
+                    } footer: {
+                        Text("New automations are saved paused. Connect services, test the workflow, then explicitly enable it.")
+                    }
+                }
+            } else {
+                ContentUnavailableView("No draft", systemImage: "doc.badge.plus")
+            }
+        }
+        .navigationTitle("Review")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
-private struct ActivityView: View {
-    @Environment(AppEnvironment.self) private var environment
+private struct WorkflowStepRow: View {
+    var number: Int
+    var step: PKWorkflowStep
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("\(number)")
+                .font(.caption.bold())
+                .frame(width: 28, height: 28)
+                .background(.tint.opacity(0.15), in: Circle())
+            Image(systemName: step.service.symbol)
+                .frame(width: 26, height: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(step.title).font(.headline)
+                Text("\(step.service.title) · \(step.operation)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if step.mutatesExternalState {
+                    Label("Approval required", systemImage: "checkmark.shield")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct AutomationsView: View {
+    @EnvironmentObject private var workspace: PKAutomationWorkspace
+
     var body: some View {
         NavigationStack {
             List {
-                if environment.activity.isEmpty {
-                    ContentUnavailableView("No Activity Yet", systemImage: "clock", description: Text("Actions, permission decisions, imports, exports, and recoverable errors appear here."))
-                }
-                ForEach(environment.activity) { event in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Label(event.category.capitalized, systemImage: event.level == .error ? "xmark.octagon" : event.level == .warning ? "exclamationmark.triangle" : "checkmark.circle")
-                            Spacer()
-                            Text(event.createdAt, style: .relative).font(.caption)
+                if workspace.automations.isEmpty {
+                    ContentUnavailableView(
+                        "No automations",
+                        systemImage: "point.3.connected.trianglepath.dotted",
+                        description: Text("Describe an automation, review its generated steps, and save it here.")
+                    )
+                } else {
+                    ForEach(workspace.automations) { automation in
+                        NavigationLink {
+                            AutomationDetailView(automationID: automation.id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 7) {
+                                HStack {
+                                    Text(automation.name).font(.headline)
+                                    Spacer()
+                                    stateBadge(automation.state)
+                                }
+                                Text(automation.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                HStack {
+                                    Label(triggerDescription(automation.trigger), systemImage: triggerSymbol(automation.trigger.kind))
+                                    Spacer()
+                                    Text("\(automation.steps.count) steps")
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 5)
                         }
-                        Text(event.message).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .onDelete { offsets in
+                        for index in offsets { workspace.delete(workspace.automations[index]) }
                     }
                 }
             }
-            .refreshable { await environment.load() }
+            .navigationTitle("Automations")
+        }
+    }
+}
+
+private struct AutomationDetailView: View {
+    @EnvironmentObject private var workspace: PKAutomationWorkspace
+    var automationID: UUID
+    @State private var confirmApprovedRun = false
+
+    private var automation: PKAutomation? {
+        workspace.automations.first { $0.id == automationID }
+    }
+
+    var body: some View {
+        Group {
+            if let automation {
+                List {
+                    Section {
+                        Text(automation.summary).foregroundStyle(.secondary)
+                        Label(triggerDescription(automation.trigger), systemImage: triggerSymbol(automation.trigger.kind))
+                    }
+                    Section("Workflow") {
+                        ForEach(Array(automation.steps.enumerated()), id: \.element.id) { index, step in
+                            WorkflowStepRow(number: index + 1, step: step)
+                        }
+                    }
+                    Section("Connections") {
+                        if automation.connections.isEmpty {
+                            Label("No OAuth account required", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        } else {
+                            ForEach(automation.connections) { connection in
+                                Label(
+                                    "\(connection.service.title): \(connection.connected ? "Connected" : "Not connected")",
+                                    systemImage: connection.connected ? "checkmark.circle.fill" : "exclamationmark.circle"
+                                )
+                                .foregroundStyle(connection.connected ? .green : .orange)
+                            }
+                        }
+                    }
+                    Section("Controls") {
+                        Button(automation.state == .active ? "Pause" : "Enable") { workspace.toggle(automation) }
+                        Button("Test deterministic run") { Task { await workspace.run(automation) } }
+                            .disabled(workspace.isWorking)
+                        if automation.steps.contains(where: \.mutatesExternalState) {
+                            Button("Review and approve test run") { confirmApprovedRun = true }
+                                .disabled(workspace.isWorking)
+                        }
+                    }
+                }
+                .navigationTitle(automation.name)
+                .confirmationDialog("Approve outbound actions?", isPresented: $confirmApprovedRun, titleVisibility: .visible) {
+                    Button("Approve this test run") { Task { await workspace.run(automation, approved: true) } }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This approval applies only to this run. It does not grant unrestricted permission to future changed workflows.")
+                }
+            } else {
+                ContentUnavailableView("Automation missing", systemImage: "questionmark.folder")
+            }
+        }
+    }
+}
+
+private struct AutomationActivityView: View {
+    @EnvironmentObject private var workspace: PKAutomationWorkspace
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if workspace.runs.isEmpty {
+                    ContentUnavailableView(
+                        "No activity",
+                        systemImage: "clock.arrow.circlepath",
+                        description: Text("Workflow tests, approvals, failures, and successful runs appear here.")
+                    )
+                } else {
+                    ForEach(workspace.runs) { event in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: runSymbol(event.state))
+                                .foregroundStyle(runColor(event.state))
+                                .frame(width: 28)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(event.automationName).font(.headline)
+                                Text(event.message).font(.subheadline).foregroundStyle(.secondary)
+                                HStack {
+                                    Text(event.state.rawValue.capitalized)
+                                    Text("·")
+                                    Text(event.createdAt, style: .relative)
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
             .navigationTitle("Activity")
         }
     }
 }
 
-private struct SettingsView: View {
-    @Environment(AppEnvironment.self) private var environment
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
-    @State private var confirmReset = false
-    private var modelStatus: String { if case .available = SystemLanguageModel.default.availability { "Available" } else { String(describing: SystemLanguageModel.default.availability) } }
+private struct ConnectionsView: View {
+    @EnvironmentObject private var workspace: PKAutomationWorkspace
+    @State private var selectedService: PKServiceKind?
+
+    private let advertisedServices: [PKServiceKind] = [
+        .gmail, .outlook, .googleCalendar, .googleDrive, .googleDocs, .googleSheets, .googleSlides,
+        .slack, .discord, .reddit, .linkedIn, .rss, .http
+    ]
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Apple Intelligence") {
-                    LabeledContent("On-device model", value: modelStatus)
-                    Text("When unavailable, PocketKernel keeps the manual builder, imports, and five templates enabled.").font(.caption).foregroundStyle(.secondary)
+            List {
+                Section {
+                    Text("OAuth authorization, refresh tokens, webhook secrets, and scheduled execution require the PocketKernel service. The app never fabricates a connected account.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                Section("Accessibility") {
-                    LabeledContent("Reduce Motion", value: reduceMotion ? "Enabled" : "Disabled")
-                    LabeledContent("Contrast", value: contrast == .increased ? "Increased" : "Standard")
+                Section("Services") {
+                    ForEach(advertisedServices, id: \.self) { service in
+                        Button { selectedService = service } label: {
+                            HStack {
+                                Label(service.title, systemImage: service.symbol)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                if workspace.requiredServices.contains(service) {
+                                    Text("Required").font(.caption).foregroundStyle(.orange)
+                                }
+                                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
                 }
-                Section("Storage") {
-                    LabeledContent("Installed Apps", value: "\(environment.apps.count)")
-                    Button("Reset All Local Data", role: .destructive) { confirmReset = true }
-                }
-                Section("Runtime Safety") {
-                    Label("Typed actions only", systemImage: "checkmark.shield")
-                    Label("HTTPS allowlists and permission broker", systemImage: "network.badge.shield.half.filled")
-                    Label("No JavaScript, WebAssembly, JIT, or native downloads", systemImage: "lock.fill")
+                Section("Local operations") {
+                    Label("RSS and HTTPS workflows can be compiled without OAuth", systemImage: "network")
+                    Label("External mutations still require explicit approval", systemImage: "checkmark.shield")
                 }
             }
-            .navigationTitle("Settings")
-            .confirmationDialog("Delete every Pocket App and record?", isPresented: $confirmReset, titleVisibility: .visible) {
-                Button("Delete All Local Data", role: .destructive) { Task { await environment.resetAllData() } }
-                Button("Cancel", role: .cancel) {}
+            .navigationTitle("Connections")
+            .sheet(item: $selectedService) { service in
+                ConnectionDetailView(service: service)
             }
         }
     }
 }
 
-struct RuntimeView: View {
-    let manifest: MicroAppManifest
-    var store: PocketStore?
-    @Environment(AppEnvironment.self) private var environment
-    @State private var selectedScreenID: String
-    @State private var recordsByCollection: [String: [PocketRecord]] = [:]
-    @State private var runtimeValues: [String: PocketValue] = [:]
-    @State private var executor: ActionExecutor?
-    @State private var editingCollection: CollectionSpec?
-    @State private var formValues: [String: String] = [:]
-    @State private var runtimeError: String?
-    @State private var runtimeAlert: String?
-    @State private var permissionRequest: PermissionRequest?
-    @State private var pendingActionID: String?
-    @State private var importing = false
-    @State private var exporting = false
-    @State private var exportDocument: PocketAppDocument?
-    @State private var shareText: String?
-    @Environment(\.dismiss) private var dismiss
+extension PKServiceKind: Identifiable {
+    var id: String { rawValue }
+}
 
-    init(manifest: MicroAppManifest, store: PocketStore? = nil) { self.manifest = manifest; self.store = store; _selectedScreenID = State(initialValue: manifest.entryScreenID) }
-    private var screen: ScreenSpec? { manifest.screens.first { $0.id == selectedScreenID } ?? manifest.screens.first }
+private struct ConnectionDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    var service: PKServiceKind
 
     var body: some View {
-        List { if let screen { ForEach(screen.components) { component in ComponentRenderer(component: component, recordsByCollection: recordsByCollection, runtimeValues: $runtimeValues, runAction: runAction, importFile: { importing = true }, exportFile: prepareExport) } } else { ContentUnavailableView("Invalid Screen", systemImage: "exclamationmark.triangle", description: Text("The entry screen is missing.")) } }
-            .navigationTitle(screen?.title ?? manifest.name)
-            .task { if let store { executor = ActionExecutor(store: store); environment.lifecycle.markRuntimeOpen(appID: manifest.id) }; await reload() }
-            .onChange(of: runtimeValues) { _, values in guard let store else { return }; Task { for (key, value) in values { try? await store.setRuntimeValue(value, appID: manifest.id, key: key) } } }
-            .sheet(item: $editingCollection) { collection in recordForm(collection) }
-            .fileImporter(isPresented: $importing, allowedContentTypes: [.pocketApp]) { result in if case .success(let url) = result, url.startAccessingSecurityScopedResource() { defer { url.stopAccessingSecurityScopedResource() }; if let data = try? Data(contentsOf: url) { Task { await environment.importPackage(data) } } } }
-            .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .pocketApp, defaultFilename: manifest.name) { result in if case .failure(let error) = result { runtimeError = error.localizedDescription } }
-            .sheet(isPresented: Binding(get: { shareText != nil }, set: { if !$0 { shareText = nil } })) { ShareSheet(text: shareText ?? "") }
-            .alert("Runtime Error", isPresented: Binding(get: { runtimeError != nil }, set: { if !$0 { runtimeError = nil } })) { Button("Retry") { if let id = pendingActionID { runAction(id) } }; Button("Dismiss", role: .cancel) { runtimeError = nil } } message: { Text(runtimeError ?? "Unknown error") }
-            .alert("Pocket App", isPresented: Binding(get: { runtimeAlert != nil }, set: { if !$0 { runtimeAlert = nil } })) { Button("OK") { runtimeAlert = nil } } message: { Text(runtimeAlert ?? "") }
-            .confirmationDialog(permissionTitle, isPresented: Binding(get: { permissionRequest != nil }, set: { if !$0 { permissionRequest = nil } }), titleVisibility: .visible) { Button("Allow Once") { decidePermission(.allowOnce) }; Button("Always Allow") { decidePermission(.alwaysAllow) }; Button("Don't Allow", role: .destructive) { decidePermission(.denied) } } message: { Text(permissionRequest?.reason ?? "This action requires permission.") }
+        NavigationStack {
+            Form {
+                Section {
+                    Label(service.title, systemImage: service.symbol).font(.title2.bold())
+                    Text(connectionExplanation(service)).foregroundStyle(.secondary)
+                }
+                if service == .rss || service == .http {
+                    Section("Available locally") {
+                        Label("No OAuth account required", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                        Text("The workflow still validates HTTPS endpoints, response limits, and approval rules.")
+                    }
+                } else {
+                    Section("Connection status") {
+                        Label("OAuth service not configured", systemImage: "exclamationmark.circle").foregroundStyle(.orange)
+                        Text("PocketKernel will use ASWebAuthenticationSession after the backend has a registered client identifier, redirect URI, encrypted token vault, and refresh endpoint for this provider.")
+                    }
+                    Section {
+                        Button("Connect \(service.title)") {}
+                            .disabled(true)
+                    } footer: {
+                        Text("Disabled deliberately: the app will not claim an account is connected until a real OAuth configuration exists.")
+                    }
+                }
+            }
+            .navigationTitle("Connection")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
     }
-
-    private var permissionTitle: String { guard let request = permissionRequest else { return "Permission Request" }; return "\(request.appName) wants \(request.capability.rawValue)" }
-    private func runAction(_ id: String) {
-        pendingActionID = id
-        guard let action = manifest.actions.first(where: { $0.id == id }) else { runtimeError = "Action not found."; return }
-        if action.kind == .createRecord, let collection = manifest.collections.first(where: { $0.id == action.target }) { formValues = Dictionary(uniqueKeysWithValues: collection.fields.map { ($0.id, "") }); editingCollection = collection; return }
-        guard let executor else { runtimeError = store == nil ? "Preview mode does not execute actions." : "Runtime is still starting."; return }
-        let context: [String: PocketValue] = ["state": .object(runtimeValues), "environment": .object(["currentDate": .date(Date())])]
-        Task { do { let result = try await executor.execute(id, manifest: manifest, context: context); apply(result); await reload(); await environment.load() } catch RuntimeExecutionError.permissionRequired(let request) { permissionRequest = request } catch RuntimeExecutionError.conditionFalse { } catch { runtimeError = error.localizedDescription } }
-    }
-
-    @MainActor private func apply(_ result: ActionResult) {
-        switch result { case .none, .record: break; case .value(let value): runtimeValues["lastResult"] = value; case .navigated(let screenID): if manifest.screens.contains(where: { $0.id == screenID }) { selectedScreenID = screenID }; case .alert(let message): runtimeAlert = message; case .host(let request): handle(request) }
-    }
-
-    @MainActor private func handle(_ request: HostRequest) {
-        switch request { case .dismiss: dismiss(); case .sheet(let title): runtimeAlert = title; case .share(let text): shareText = text; case .importFile: importing = true; case .exportFile: prepareExport(); case .selectPhotos: runtimeAlert = "Use the photo picker component to select an image."; case .openURL(let value): if let url = URL(string: value) { UIApplication.shared.open(url) } }
-    }
-
-    private func decidePermission(_ decision: PermissionDecision) {
-        guard let request = permissionRequest, let executor else { permissionRequest = nil; return }
-        permissionRequest = nil
-        Task { do { try await executor.decide(decision, request: request); if let store { try? await store.log(appID: manifest.id, level: decision == .denied ? .warning : .info, category: "permission", message: "\(decision.rawValue): \(request.capability.rawValue)") }; if decision != .denied, let id = pendingActionID { runAction(id) } } catch { runtimeError = error.localizedDescription } }
-    }
-
-    private func recordForm(_ collection: CollectionSpec) -> some View {
-        NavigationStack { Form { ForEach(collection.fields) { field in TextField(field.title, text: Binding(get: { formValues[field.id, default: ""] }, set: { formValues[field.id] = $0 })) } }.navigationTitle("Add \(collection.title)").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingCollection = nil } }; ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save(collection) } } } } }
-    }
-
-    private func save(_ collection: CollectionSpec) async {
-        guard let store else { editingCollection = nil; return }
-        let now = Date(); let values = formValues.mapValues { PocketValue.string($0) }
-        do { try await store.save(record: .init(id: UUID(), collectionID: collection.id, values: values, createdAt: now, updatedAt: now), appID: manifest.id); try await store.log(appID: manifest.id, level: .info, category: "record", message: "Created record in \(collection.title)"); editingCollection = nil; await reload() } catch { runtimeError = error.localizedDescription }
-    }
-
-    private func reload() async { guard let store else { return }; for collection in manifest.collections { recordsByCollection[collection.id] = (try? await store.records(appID: manifest.id, collectionID: collection.id)) ?? [] } }
-    private func prepareExport() { guard let data = environment.exportPackage(manifest) else { runtimeError = "Package export failed."; return }; exportDocument = PocketAppDocument(data: data); exporting = true }
 }
 
-struct PocketAppDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.pocketApp] }
-    let data: Data
-    init(data: Data) { self.data = data }
-    init(configuration: ReadConfiguration) throws { guard let data = configuration.file.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }; self.data = data }
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
+private func stateBadge(_ state: PKAutomationState) -> some View {
+    Text(state.rawValue.capitalized)
+        .font(.caption2.bold())
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(state == .active ? Color.green.opacity(0.16) : Color.secondary.opacity(0.12), in: Capsule())
 }
 
-private struct ShareSheet: UIViewControllerRepresentable {
-    let text: String
-    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: [text], applicationActivities: nil) }
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+private func triggerSymbol(_ trigger: PKTriggerKind) -> String {
+    switch trigger {
+    case .manual: "play.circle"
+    case .schedule: "calendar.badge.clock"
+    case .webhook: "link.badge.plus"
+    case .accountEvent: "tray.and.arrow.down"
+    case .webCondition: "waveform.path.ecg"
+    case .workflowCompleted: "arrow.triangle.branch"
+    case .location: "location.fill"
+    }
+}
+
+private func triggerDescription(_ trigger: PKTrigger) -> String {
+    switch trigger.kind {
+    case .manual:
+        return "Run manually"
+    case .schedule:
+        let cadence = trigger.configuration["cadence"] ?? "scheduled"
+        let time = trigger.configuration["time"] ?? "08:00"
+        return "\(cadence.capitalized) at \(time) · \(trigger.timeZoneIdentifier)"
+    case .webhook:
+        return "Incoming webhook"
+    case .accountEvent:
+        return "When a connected account changes"
+    case .webCondition:
+        return "When a monitored condition matches"
+    case .workflowCompleted:
+        return "After another workflow completes"
+    case .location:
+        return "Location-aware trigger"
+    }
+}
+
+private func runSymbol(_ state: PKRunState) -> String {
+    switch state {
+    case .running: "arrow.triangle.2.circlepath"
+    case .waitingForApproval: "checkmark.shield"
+    case .succeeded: "checkmark.circle.fill"
+    case .failed: "xmark.octagon.fill"
+    }
+}
+
+private func runColor(_ state: PKRunState) -> Color {
+    switch state {
+    case .running: .blue
+    case .waitingForApproval: .orange
+    case .succeeded: .green
+    case .failed: .red
+    }
+}
+
+private func connectionExplanation(_ service: PKServiceKind) -> String {
+    switch service {
+    case .gmail, .outlook: "Read authorized message context, triage threads, prepare drafts, and send only after approval."
+    case .googleCalendar: "Read availability and prepare or create events using the minimum required scopes."
+    case .googleDrive, .googleDocs, .googleSheets, .googleSlides: "Find files and prepare or update approved documents and spreadsheets."
+    case .slack, .discord: "Read approved channels and prepare or post messages according to each workflow's approval policy."
+    case .reddit, .linkedIn: "Prepare social content and publish only after explicit approval."
+    case .rss: "Read public RSS and Atom feeds without an account connection."
+    case .http: "Call declared HTTPS endpoints with strict redirects, timeouts, and response-size limits."
+    default: "Used internally by validated PocketKernel workflows."
+    }
 }
