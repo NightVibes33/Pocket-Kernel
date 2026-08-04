@@ -8,11 +8,20 @@ struct RootTabView: View {
     @AppStorage("PKAutomationOnboardingComplete") private var onboardingComplete = false
     @StateObject private var workspace = PKAutomationWorkspace()
     @State private var selectedTab: RootTab
+    @State private var forceOnboarding: Bool
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
         let requested = Self.argumentValue("-PKStartTab", arguments: arguments)
-        _selectedTab = State(initialValue: requested == "create" ? .create : requested == "connections" ? .connections : .today)
+        let initialTab: RootTab = switch requested {
+        case "create": .create
+        case "automations": .automations
+        case "activity": .activity
+        case "connections": .connections
+        default: .today
+        }
+        _selectedTab = State(initialValue: initialTab)
+        _forceOnboarding = State(initialValue: arguments.contains("-PKResetOnboarding"))
     }
 
     var body: some View {
@@ -35,10 +44,21 @@ struct RootTabView: View {
         }
         .environmentObject(workspace)
         .fullScreenCover(isPresented: Binding(
-            get: { !onboardingComplete && !ProcessInfo.processInfo.arguments.contains("-PKUITesting") },
-            set: { if !$0 { onboardingComplete = true } }
+            get: {
+                forceOnboarding
+                    || (!onboardingComplete && !ProcessInfo.processInfo.arguments.contains("-PKUITesting"))
+            },
+            set: {
+                if !$0 {
+                    onboardingComplete = true
+                    forceOnboarding = false
+                }
+            }
         )) {
-            AutomationOnboardingView { onboardingComplete = true }
+            AutomationOnboardingView {
+                onboardingComplete = true
+                forceOnboarding = false
+            }
         }
         .alert("PocketKernel", isPresented: Binding(
             get: { workspace.errorMessage != nil },
@@ -269,14 +289,19 @@ private struct AutomationCreateView: View {
                 }
                 Section {
                     Button {
-                        workspace.compilePrompt()
-                        showingDraft = workspace.draft != nil
+                        Task {
+                            await workspace.compilePrompt()
+                            showingDraft = workspace.draft != nil
+                        }
                     } label: {
                         Label("Build workflow", systemImage: "wand.and.stars")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(workspace.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(
+                        workspace.isWorking
+                            || workspace.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
                 } footer: {
                     Text("The builder produces registered operations and typed inputs. It never generates executable Swift, JavaScript, shell commands, or arbitrary server code.")
                 }
@@ -632,16 +657,22 @@ private func triggerSymbol(_ trigger: PKTriggerKind) -> String {
 
 private func triggerDescription(_ trigger: PKTrigger) -> String {
     switch trigger.kind {
-    case .manual: "Run manually"
+    case .manual:
+        return "Run manually"
     case .schedule:
         let cadence = trigger.configuration["cadence"] ?? "scheduled"
         let time = trigger.configuration["time"] ?? "08:00"
         return "\(cadence.capitalized) at \(time) · \(trigger.timeZoneIdentifier)"
-    case .webhook: "Incoming webhook"
-    case .accountEvent: "When a connected account changes"
-    case .webCondition: "When a monitored condition matches"
-    case .workflowCompleted: "After another workflow completes"
-    case .location: "Location-aware trigger"
+    case .webhook:
+        return "Incoming webhook"
+    case .accountEvent:
+        return "When a connected account changes"
+    case .webCondition:
+        return "When a monitored condition matches"
+    case .workflowCompleted:
+        return "After another workflow completes"
+    case .location:
+        return "Location-aware trigger"
     }
 }
 

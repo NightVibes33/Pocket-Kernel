@@ -426,6 +426,7 @@ final class PKAutomationWorkspace: ObservableObject {
     @Published var isWorking = false
 
     private let compiler = PKAutomationCompiler()
+    private let foundationGenerator = PKFoundationAutomationGenerator()
     private let validator = PKAutomationValidator()
     private let executor = PKDeterministicExecutor()
     private let storageURL: URL
@@ -435,18 +436,40 @@ final class PKAutomationWorkspace: ObservableObject {
         let directory = base.appending(path: "PocketKernelAutomation", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         storageURL = directory.appending(path: "workspace.json")
+        if ProcessInfo.processInfo.arguments.contains("-PKResetDatabase") {
+            try? FileManager.default.removeItem(at: storageURL)
+        }
         load()
     }
 
-    func compilePrompt() {
+    func compilePrompt() async {
+        isWorking = true
+        defer { isWorking = false }
         do {
-            let result = try compiler.compile(prompt)
+            let result: PKAutomation
+            if modelMode == "mock" || modelMode == "local" {
+                result = try compiler.compile(prompt)
+            } else {
+                do {
+                    result = try await foundationGenerator.generate(prompt)
+                } catch {
+                    result = try compiler.compile(prompt)
+                }
+            }
             draft = result
             validationIssues = validator.validate(result)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private var modelMode: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-PKModelMode"),
+              arguments.indices.contains(index + 1)
+        else { return nil }
+        return arguments[index + 1].lowercased()
     }
 
     func saveDraft() {

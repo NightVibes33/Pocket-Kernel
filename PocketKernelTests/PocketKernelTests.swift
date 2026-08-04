@@ -559,3 +559,59 @@ final class PromptBlueprintGeneratorTests: XCTestCase {
         XCTAssertTrue(blueprint.actions.contains { $0.kind == .exportFile })
     }
 }
+
+final class AutomationPlatformTests: XCTestCase {
+    func testCompilerCreatesDifferentRegisteredWorkflows() throws {
+        let compiler = PKAutomationCompiler()
+        let digest = try compiler.compile(
+            "Every weekday at 8 AM, summarize unread customer emails and post the digest to Slack"
+        )
+        let alert = try compiler.compile(
+            "Monitor https://api.example.org/price and alert me when the price drops below 20"
+        )
+
+        XCTAssertEqual(digest.trigger.kind, .schedule)
+        XCTAssertEqual(digest.trigger.configuration["time"], "08:00")
+        XCTAssertTrue(digest.steps.contains { $0.service == .gmail && $0.operation == "searchMessages" })
+        XCTAssertTrue(digest.steps.contains { $0.service == .intelligence && $0.operation == "summarize" })
+        XCTAssertTrue(digest.steps.contains { $0.service == .slack && $0.operation == "postMessage" })
+        XCTAssertEqual(alert.trigger.kind, .webCondition)
+        XCTAssertTrue(alert.steps.contains { $0.service == .http && $0.operation == "getJSON" })
+        XCTAssertNotEqual(digest.steps.map(\.operation), alert.steps.map(\.operation))
+        XCTAssertFalse(PKAutomationValidator().validate(digest).contains { $0.severity == .error })
+        XCTAssertFalse(PKAutomationValidator().validate(alert).contains { $0.severity == .error })
+    }
+
+    func testExternalMutationsAlwaysRequireApproval() throws {
+        let automation = try PKAutomationCompiler().compile(
+            "When an urgent Gmail arrives, draft a reply and notify me"
+        )
+        let mutations = automation.steps.filter(\.mutatesExternalState)
+        XCTAssertFalse(mutations.isEmpty)
+        XCTAssertTrue(mutations.allSatisfy { $0.approval == .externalMutation })
+    }
+
+    func testValidatorRejectsUnknownOperationsAndUnapprovedMutations() throws {
+        var automation = try PKAutomationCompiler().compile("Post a digest to Slack")
+        automation.steps[0].operation = "inventedOperation"
+        XCTAssertTrue(
+            PKAutomationValidator().validate(automation).contains { $0.code == "operation.unsupported" }
+        )
+
+        automation = try PKAutomationCompiler().compile("Notify me with the result")
+        let mutationIndex = try XCTUnwrap(automation.steps.firstIndex(where: \.mutatesExternalState))
+        automation.steps[mutationIndex].approval = .none
+        XCTAssertTrue(
+            PKAutomationValidator().validate(automation).contains { $0.code == "approval.required" }
+        )
+    }
+
+    func testDeterministicExecutorStopsForApproval() async throws {
+        let automation = try PKAutomationCompiler().compile("Notify me with a daily summary")
+        let executor = PKDeterministicExecutor()
+        let waiting = await executor.execute(automation, approved: false)
+        XCTAssertEqual(waiting.state, .waitingForApproval)
+        let approved = await executor.execute(automation, approved: true)
+        XCTAssertEqual(approved.state, .succeeded)
+    }
+}
