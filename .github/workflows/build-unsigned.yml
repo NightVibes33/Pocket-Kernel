@@ -70,9 +70,10 @@ jobs:
         run: |
           set -euo pipefail
           /usr/bin/python3 Scripts/integrate_automation_product.py
+          /usr/bin/python3 Scripts/refine_automation_product.py
           swiftformat PocketKernel PocketKernelTests PocketKernelUITests --config .swiftformat
           grep -q 'FoundationAutomationGenerator.swift in Sources' PocketKernel.xcodeproj/project.pbxproj
-          grep -q 'return switch trigger.kind' PocketKernel/Shell/RootTabView.swift
+          grep -q 'return "Run manually"' PocketKernel/Shell/RootTabView.swift
           grep -q 'final class AutomationPlatformTests' PocketKernelTests/PocketKernelTests.swift
           grep -q 'testBuildReviewSaveAndPersistTypedWorkflow' PocketKernelUITests/PocketKernelUITests.swift
 
