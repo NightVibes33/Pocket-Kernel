@@ -346,19 +346,15 @@ final class AccountController: NSObject, ObservableObject, ASWebAuthenticationPr
 }
 
 struct AppEntryView: View {
-    @EnvironmentObject private var account: AccountController
     @AppStorage("didCompleteOnboarding.v2") private var didCompleteOnboarding = false
     @State private var bootFinished = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
-            if !bootFinished || account.isRestoring {
+            if !bootFinished {
                 KernelBootView()
                     .transition(.opacity)
-            } else if !account.isSignedIn {
-                AccountGatewayView()
-                    .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 1.025)), removal: .opacity))
             } else if !didCompleteOnboarding {
                 OnboardingView { didCompleteOnboarding = true }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -367,12 +363,9 @@ struct AppEntryView: View {
                     .transition(.opacity)
             }
         }
-        .animation(reduceMotion ? .linear(duration: 0.16) : .spring(duration: 0.7, bounce: 0.16), value: account.isSignedIn)
         .animation(reduceMotion ? .linear(duration: 0.16) : .easeInOut(duration: 0.48), value: bootFinished)
         .task {
-            async let restoration: Void = account.restore()
             try? await Task.sleep(for: .milliseconds(reduceMotion ? 250 : 1150))
-            await restoration
             bootFinished = true
         }
     }
