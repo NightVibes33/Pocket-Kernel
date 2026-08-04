@@ -1,0 +1,33 @@
+name: Apply Auth Motion Bundle
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .bootstrap/auth-motion-pr-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: macos-26-intel
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Apply verified product upgrade
+        run: bash Scripts/apply_auth_motion.sh
+
+      - name: Commit upgraded product
+        run: |
+          set -euo pipefail
+          git config user.name 'PocketKernel Build Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add cinematic launch and production account gateway'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
