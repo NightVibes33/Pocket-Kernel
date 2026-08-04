@@ -2,11 +2,13 @@ name: Build PocketKernel Unsigned IPA
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
 concurrency:
-  group: pocketkernel-ios
+  group: pocketkernel-ios-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   build:
