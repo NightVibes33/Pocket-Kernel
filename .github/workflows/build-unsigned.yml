@@ -35,12 +35,11 @@ jobs:
       OUTPUT_DIR: ${{ github.workspace }}/output
 
     steps:
-      - name: Check out automation rebuild branch
+      - name: Check out committed source
         uses: actions/checkout@v6
         with:
-          ref: pocketkernel-1.0-full-rebuild
-          fetch-depth: 0
-          persist-credentials: true
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Verify runner and Xcode
         shell: bash
@@ -65,18 +64,6 @@ jobs:
           mkdir -p build output
           chmod +x Scripts/*.sh Scripts/*.py
 
-      - name: Apply automation product source upgrade
-        shell: bash
-        run: |
-          set -euo pipefail
-          /usr/bin/python3 Scripts/integrate_automation_product.py
-          /usr/bin/python3 Scripts/refine_automation_product.py
-          swiftformat PocketKernel PocketKernelTests PocketKernelUITests --config .swiftformat
-          grep -q 'FoundationAutomationGenerator.swift in Sources' PocketKernel.xcodeproj/project.pbxproj
-          grep -q 'return "Run manually"' PocketKernel/Shell/RootTabView.swift
-          grep -q 'final class AutomationPlatformTests' PocketKernelTests/PocketKernelTests.swift
-          grep -q 'testBuildReviewSaveAndPersistTypedWorkflow' PocketKernelUITests/PocketKernelUITests.swift
-
       - name: Validate project and source
         shell: bash
         run: |
@@ -86,6 +73,9 @@ jobs:
           grep -q "PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel" build/build-settings.txt
           grep -q "SWIFT_STRICT_CONCURRENCY = complete" build/build-settings.txt
           grep -q "ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon" build/build-settings.txt
+          grep -q 'FoundationAutomationGenerator.swift in Sources' PocketKernel.xcodeproj/project.pbxproj
+          grep -q 'final class AutomationPlatformTests' PocketKernelTests/PocketKernelTests.swift
+          grep -q 'testBuildReviewSaveAndPersistTypedWorkflow' PocketKernelUITests/PocketKernelUITests.swift
           Scripts/scan_source.sh
           Scripts/validate_templates.py PocketKernel/Templates
           swiftformat PocketKernel PocketKernelTests PocketKernelUITests --lint --config .swiftformat
@@ -162,18 +152,6 @@ jobs:
           Scripts/validate_ipa.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
           (cd "$OUTPUT_DIR" && shasum -a 256 PocketKernel-unsigned.ipa > SHA256SUMS.txt)
           Scripts/generate_build_report.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa" "$OUTPUT_DIR/BuildReport.md"
-
-      - name: Persist verified automation source
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add PocketKernel PocketKernelTests PocketKernelUITests PocketKernel.xcodeproj/project.pbxproj
-          if ! git diff --cached --quiet; then
-            git commit -m 'Integrate Foundation automation generation and product tests'
-            git push origin HEAD:pocketkernel-1.0-full-rebuild
-          fi
 
       - name: Archive test diagnostics
         if: always()
