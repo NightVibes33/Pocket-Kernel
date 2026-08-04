@@ -225,8 +225,8 @@ final class AccountController: NSObject, ObservableObject, ASWebAuthenticationPr
     func signInWithGoogle() async {
         await runBusy {
             let url = try await AccountAPI.shared.googleAuthorizationURL()
-            let ticket = try await openAuthenticationSession(url: url)
-            profile = try await AccountAPI.shared.exchangeGoogleTicket(ticket)
+            let ticket = try await self.openAuthenticationSession(url: url)
+            self.profile = try await AccountAPI.shared.exchangeGoogleTicket(ticket)
         }
     }
 
@@ -238,7 +238,7 @@ final class AccountController: NSObject, ObservableObject, ASWebAuthenticationPr
         }
         await runBusy {
             _ = try await AccountAPI.shared.startEmail(normalized)
-            emailAwaitingCode = normalized
+            self.emailAwaitingCode = normalized
         }
     }
 
@@ -250,8 +250,8 @@ final class AccountController: NSObject, ObservableObject, ASWebAuthenticationPr
             return
         }
         await runBusy {
-            profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)
-            emailAwaitingCode = nil
+            self.profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)
+            self.emailAwaitingCode = nil
         }
     }
 
@@ -285,7 +285,7 @@ final class AccountController: NSObject, ObservableObject, ASWebAuthenticationPr
 
     private func signInWithApple(token: String, nonce: String, name: String?, email: String?) async {
         await runBusy {
-            profile = try await AccountAPI.shared.signInWithApple(identityToken: token, nonce: nonce, name: name, email: email)
+            self.profile = try await AccountAPI.shared.signInWithApple(identityToken: token, nonce: nonce, name: name, email: email)
         }
     }
 

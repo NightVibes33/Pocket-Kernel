@@ -1227,6 +1227,7 @@ struct ActivitySummary: View {
 struct ProfileView: View {
     @EnvironmentObject private var chat: ChatController
     @EnvironmentObject private var oauth: OAuthCoordinator
+    @EnvironmentObject private var account: AccountController
     @AppStorage("didCompleteOnboarding.v2") private var didCompleteOnboarding = true
     @State private var serviceStatus = "Checking…"
     @State private var showDeleteConfirmation = false
