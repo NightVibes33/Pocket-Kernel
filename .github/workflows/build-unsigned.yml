@@ -14,7 +14,7 @@ on:
         type: boolean
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pocketkernel-one-shot-build-${{ github.ref }}
@@ -35,7 +35,7 @@ jobs:
       OUTPUT_DIR: ${{ github.workspace }}/output
 
     steps:
-      - name: Check out committed source
+      - name: Check out source
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
