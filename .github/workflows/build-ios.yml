@@ -19,7 +19,7 @@ jobs:
       DERIVED_DATA: ${{ github.workspace }}/build/DerivedData
       OUTPUT_DIR: ${{ github.workspace }}/output
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Verify toolchain
         run: |
           set -euo pipefail
@@ -48,6 +48,14 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' DEVELOPMENT_TEAM='' \
             2>&1 | tee "$OUTPUT_DIR/xcodebuild.log"
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketKernel-build-diagnostics-${{ github.run_number }}
+          path: output/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Package and validate
         run: |
           Scripts/build_unsigned_ipa.sh "$DERIVED_DATA/Build/Products/Release-iphoneos/PocketKernel.app" "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
