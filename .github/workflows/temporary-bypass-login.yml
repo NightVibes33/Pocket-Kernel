@@ -1,0 +1,74 @@
+name: Temporarily bypass login
+
+on:
+  push:
+    branches:
+      - product/app-store-ready
+    paths:
+      - .github/workflows/temporary-bypass-login.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: product/app-store-ready
+          fetch-depth: 0
+
+      - name: Bypass account gateway while preserving boot
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('PocketKernel/App/EntryExperience.swift')
+          text = path.read_text()
+          pattern = r"struct AppEntryView: View \{.*?\n\}\n\nstruct KernelBootView: View \{"
+          replacement = '''struct AppEntryView: View {
+              @AppStorage("didCompleteOnboarding.v2") private var didCompleteOnboarding = false
+              @State private var bootFinished = false
+              @Environment(\\.accessibilityReduceMotion) private var reduceMotion
+
+              var body: some View {
+                  ZStack {
+                      if !bootFinished {
+                          KernelBootView()
+                              .transition(.opacity)
+                      } else if !didCompleteOnboarding {
+                          OnboardingView { didCompleteOnboarding = true }
+                              .transition(.move(edge: .trailing).combined(with: .opacity))
+                      } else {
+                          RootView()
+                              .transition(.opacity)
+                      }
+                  }
+                  .animation(reduceMotion ? .linear(duration: 0.16) : .easeInOut(duration: 0.48), value: bootFinished)
+                  .task {
+                      try? await Task.sleep(for: .milliseconds(reduceMotion ? 250 : 1150))
+                      bootFinished = true
+                  }
+              }
+          }
+
+          struct KernelBootView: View {'''
+          updated, count = re.subn(pattern, replacement, text, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'Expected one AppEntryView block, replaced {count}')
+          path.write_text(updated)
+          PY
+
+          rm .github/workflows/temporary-bypass-login.yml
+
+      - name: Commit bypass
+        shell: bash
+        run: |
+          git config user.name "PocketKernel CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add PocketKernel/App/EntryExperience.swift .github/workflows/temporary-bypass-login.yml
+          git commit -m "fix: temporarily bypass login gateway"
+          git push origin HEAD:product/app-store-ready
