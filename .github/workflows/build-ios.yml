@@ -20,6 +20,8 @@ jobs:
       OUTPUT_DIR: ${{ github.workspace }}/output
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - name: Apply confirmed Swift 6 source fixes
         run: |
           set -euo pipefail
