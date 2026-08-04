@@ -17,13 +17,13 @@ if (!files.length) throw new Error('No backend files found');
 
 const requiredFiles = [
   'api/auth/apple.js',
-  'api/auth/email/signup.js',
-  'api/auth/email/signin.js',
   'api/auth/google/start.js',
   'api/auth/google/callback.js',
   'api/auth/exchange.js',
-  'lib/account.js',
-  'lib/oidc.js'
+  'api/auth/email/start.js',
+  'api/auth/email/verify.js',
+  'api/auth/session.js',
+  'lib/account-auth.js'
 ];
 for (const relative of requiredFiles) {
   if (!fs.existsSync(path.join(root, relative))) throw new Error(`Missing production account route: ${relative}`);
@@ -38,4 +38,4 @@ for (const file of files) {
   if (check.status !== 0) throw new Error(`Syntax error in ${file}:\n${check.stderr || check.stdout}`);
 }
 
-console.log(`Validated ${files.length} backend modules, production account routes, syntax, and secret boundaries.`);
+console.log(`Validated ${files.length} backend modules, Apple/Google/email-code account routes, syntax, and secret boundaries.`);
