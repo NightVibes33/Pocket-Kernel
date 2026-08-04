@@ -1,0 +1,47 @@
+name: Integrate Automation Core
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/integrate-automation-core.yml'
+permissions:
+  contents: write
+jobs:
+  integrate:
+    if: github.head_ref == 'pocketkernel-1.0-full-rebuild'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+      - name: Add AutomationCore to Xcode target
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('PocketKernel.xcodeproj/project.pbxproj')
+          text = path.read_text()
+          build = 'B10000000000000000000025 /* AutomationCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000030; };'
+          ref = 'F10000000000000000000030 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutomationCore.swift; sourceTree = "<group>"; };'
+          if build not in text:
+              text = text.replace('/* End PBXBuildFile section */', '\t\t' + build + '\n/* End PBXBuildFile section */')
+          if ref not in text:
+              text = text.replace('/* End PBXFileReference section */', '\t\t' + ref + '\n/* End PBXFileReference section */')
+          text = text.replace(
+              'G10000000000000000000018 = {isa = PBXGroup; path = Runtime; sourceTree = "<group>"; children = (F10000000000000000000022,F10000000000000000000023,F10000000000000000000024,); };',
+              'G10000000000000000000018 = {isa = PBXGroup; path = Runtime; sourceTree = "<group>"; children = (F10000000000000000000022,F10000000000000000000023,F10000000000000000000024,F10000000000000000000030,); };'
+          )
+          text = text.replace(
+              'B10000000000000000000020,B10000000000000000000021,B10000000000000000000022,); runOnlyForDeploymentPostprocessing = 0; };',
+              'B10000000000000000000020,B10000000000000000000021,B10000000000000000000022,B10000000000000000000025,); runOnlyForDeploymentPostprocessing = 0; };'
+          )
+          path.write_text(text)
+      - name: Verify and commit
+        run: |
+          set -euo pipefail
+          grep -q 'AutomationCore.swift in Sources' PocketKernel.xcodeproj/project.pbxproj
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add PocketKernel.xcodeproj/project.pbxproj
+          git diff --cached --quiet || git commit -m 'Integrate automation core into app target'
+          git push origin HEAD:pocketkernel-1.0-full-rebuild
