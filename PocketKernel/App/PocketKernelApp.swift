@@ -261,7 +261,6 @@ struct NovaPrimaryButtonStyle: ButtonStyle {
 // MARK: - Entry experience
 
 struct NovaEntryView: View {
-    @EnvironmentObject private var account: AccountController
     @AppStorage("didCompleteOnboarding.v3") private var didCompleteOnboarding = false
     @State private var phase: Phase = .launch
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -278,10 +277,7 @@ struct NovaEntryView: View {
                 NovaBootView()
                     .transition(.opacity.combined(with: .scale(scale: 1.03)))
             case .ready:
-                if !account.isSignedIn {
-                    NovaAccountGatewayView()
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                } else if !didCompleteOnboarding {
+                if !didCompleteOnboarding {
                     NovaOnboardingView { didCompleteOnboarding = true }
                         .transition(.opacity.combined(with: .move(edge: .trailing)))
                 } else {
@@ -291,11 +287,9 @@ struct NovaEntryView: View {
             }
         }
         .background(NovaPalette.ink)
-        .animation(reduceMotion ? .linear(duration: 0.16) : .spring(duration: 0.72, bounce: 0.15), value: account.isSignedIn)
+        .animation(reduceMotion ? .linear(duration: 0.16) : .easeInOut(duration: 0.52), value: phase)
         .task {
-            async let restoration: Void = account.restore()
             try? await Task.sleep(for: .milliseconds(reduceMotion ? 180 : 880))
-            await restoration
             withAnimation(reduceMotion ? .linear(duration: 0.16) : .easeInOut(duration: 0.52)) {
                 phase = .ready
             }
