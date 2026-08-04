@@ -35,11 +35,12 @@ jobs:
       OUTPUT_DIR: ${{ github.workspace }}/output
 
     steps:
-      - name: Check out source
+      - name: Check out automation rebuild branch
         uses: actions/checkout@v6
         with:
-          fetch-depth: 1
-          persist-credentials: false
+          ref: pocketkernel-1.0-full-rebuild
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Verify runner and Xcode
         shell: bash
@@ -63,6 +64,17 @@ jobs:
           rm -rf build output
           mkdir -p build output
           chmod +x Scripts/*.sh Scripts/*.py
+
+      - name: Apply automation product source upgrade
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 Scripts/integrate_automation_product.py
+          swiftformat PocketKernel PocketKernelTests PocketKernelUITests --config .swiftformat
+          grep -q 'FoundationAutomationGenerator.swift in Sources' PocketKernel.xcodeproj/project.pbxproj
+          grep -q 'return switch trigger.kind' PocketKernel/Shell/RootTabView.swift
+          grep -q 'final class AutomationPlatformTests' PocketKernelTests/PocketKernelTests.swift
+          grep -q 'testBuildReviewSaveAndPersistTypedWorkflow' PocketKernelUITests/PocketKernelUITests.swift
 
       - name: Validate project and source
         shell: bash
@@ -149,6 +161,18 @@ jobs:
           Scripts/validate_ipa.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
           (cd "$OUTPUT_DIR" && shasum -a 256 PocketKernel-unsigned.ipa > SHA256SUMS.txt)
           Scripts/generate_build_report.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa" "$OUTPUT_DIR/BuildReport.md"
+
+      - name: Persist verified automation source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add PocketKernel PocketKernelTests PocketKernelUITests PocketKernel.xcodeproj/project.pbxproj
+          if ! git diff --cached --quiet; then
+            git commit -m 'Integrate Foundation automation generation and product tests'
+            git push origin HEAD:pocketkernel-1.0-full-rebuild
+          fi
 
       - name: Archive test diagnostics
         if: always()
