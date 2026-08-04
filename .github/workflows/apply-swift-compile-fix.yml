@@ -1,95 +1,10 @@
-name: Apply Swift compile fix
+name: Archived Swift compile fix
 
 on:
-  push:
-    branches:
-      - product/app-store-ready
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
-  fix:
-    if: github.actor != 'github-actions[bot]'
+  archived:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: product/app-store-ready
-          fetch-depth: 0
-
-      - name: Patch compiler errors
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          def replace_once(text: str, old: str, new: str, label: str) -> str:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"Expected exactly one {label} match but found {count}: {old!r}")
-              return text.replace(old, new, 1)
-
-          views_path = Path("PocketKernel/UI/Views.swift")
-          views = views_path.read_text()
-          views = replace_once(
-              views,
-              "struct ProfileView: View {\n    @EnvironmentObject private var chat: ChatController\n    @EnvironmentObject private var oauth: OAuthCoordinator\n",
-              "struct ProfileView: View {\n    @EnvironmentObject private var chat: ChatController\n    @EnvironmentObject private var oauth: OAuthCoordinator\n    @EnvironmentObject private var account: AccountController\n",
-              "ProfileView account environment",
-          )
-          views_path.write_text(views)
-
-          entry_path = Path("PocketKernel/App/EntryExperience.swift")
-          entry = entry_path.read_text()
-          replacements = [
-              (
-                  "Task { await signInWithApple(token: token, nonce: nonce, name: name, email: credential.email) }",
-                  "Task { await self.signInWithApple(token: token, nonce: nonce, name: name, email: credential.email) }",
-                  "Apple task capture",
-              ),
-              (
-                  "let ticket = try await openAuthenticationSession(url: url)",
-                  "let ticket = try await self.openAuthenticationSession(url: url)",
-                  "Google web session capture",
-              ),
-              (
-                  "profile = try await AccountAPI.shared.exchangeGoogleTicket(ticket)",
-                  "self.profile = try await AccountAPI.shared.exchangeGoogleTicket(ticket)",
-                  "Google profile capture",
-              ),
-              (
-                  "emailAwaitingCode = normalized",
-                  "self.emailAwaitingCode = normalized",
-                  "email start capture",
-              ),
-              (
-                  "profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)",
-                  "self.profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)",
-                  "email verification profile capture",
-              ),
-              (
-                  "self.profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)\n            emailAwaitingCode = nil",
-                  "self.profile = try await AccountAPI.shared.verifyEmail(email, code: normalizedCode)\n            self.emailAwaitingCode = nil",
-                  "email verification state capture",
-              ),
-              (
-                  "profile = try await AccountAPI.shared.signInWithApple(identityToken: token, nonce: nonce, name: name, email: email)",
-                  "self.profile = try await AccountAPI.shared.signInWithApple(identityToken: token, nonce: nonce, name: name, email: email)",
-                  "Apple profile capture",
-              ),
-          ]
-          for old, new, label in replacements:
-              entry = replace_once(entry, old, new, label)
-          entry_path.write_text(entry)
-          PY
-
-          rm .github/workflows/apply-swift-compile-fix.yml
-
-          git config user.name "PocketKernel CI"
-          git config user.email "actions@users.noreply.github.com"
-          git add PocketKernel/UI/Views.swift PocketKernel/App/EntryExperience.swift .github/workflows/apply-swift-compile-fix.yml
-          git diff --cached --check
-          git commit -m "fix: resolve Swift 6 account compile errors"
-          git push origin HEAD:product/app-store-ready
+      - run: echo "Swift 6 source fixes are already committed."
