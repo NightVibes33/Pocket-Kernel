@@ -1,10 +1,45 @@
-name: Archived Swift compile fix
+name: Apply final Swift compile fix
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - product/app-store-ready
+
+permissions:
+  contents: write
 
 jobs:
-  archived:
+  fix:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     steps:
-      - run: echo "Swift 6 source fixes are already committed."
+      - uses: actions/checkout@v5
+        with:
+          ref: product/app-store-ready
+          fetch-depth: 0
+
+      - name: Fix Apple task capture and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("PocketKernel/App/EntryExperience.swift")
+          text = path.read_text()
+          old = "Task { await signInWithApple(token: token, nonce: nonce, name: name, email: credential.email) }"
+          new = "Task { await self.signInWithApple(token: token, nonce: nonce, name: name, email: credential.email) }"
+          if new not in text:
+              if text.count(old) != 1:
+                  raise SystemExit(f"Expected one Apple sign-in task capture, found {text.count(old)}")
+              text = text.replace(old, new, 1)
+              path.write_text(text)
+          PY
+
+          rm .github/workflows/apply-swift-compile-fix.yml
+          git config user.name "PocketKernel CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add PocketKernel/App/EntryExperience.swift .github/workflows/apply-swift-compile-fix.yml
+          git diff --cached --check
+          git commit -m "fix: complete Swift 6 account captures"
+          git push origin HEAD:product/app-store-ready
