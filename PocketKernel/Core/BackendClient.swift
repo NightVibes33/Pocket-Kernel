@@ -36,12 +36,11 @@ actor BackendClient {
     private var session: DeviceSession?
 
     var baseURL: URL {
-        let stored = UserDefaults.standard.string(forKey: "backendURL") ?? "https://pocketkernel.vercel.app"
-        return URL(string: stored.trimmingCharacters(in: CharacterSet(charactersIn: "/")))!
+        URL(string: "https://pocketkernel.vercel.app")!
     }
 
     private func deviceID() -> String {
-        if let value = KeychainStore.string(for: "deviceID") { return value }
+        if let value = KeychainStore.string(for: "deviceID"), !value.isEmpty { return value }
         let value = "ios_\(UUID().uuidString.replacingOccurrences(of: "-", with: ""))"
         KeychainStore.set(value, for: "deviceID")
         return value
@@ -50,7 +49,7 @@ actor BackendClient {
     func ensureSession() async throws -> DeviceSession {
         if let session { return session }
         if let token = KeychainStore.string(for: "apiToken"), !token.isEmpty,
-           let userID = KeychainStore.string(for: "userID") {
+           let userID = KeychainStore.string(for: "userID"), !userID.isEmpty {
             let cached = DeviceSession(userID: userID, token: token, expiresIn: 0)
             session = cached
             return cached
@@ -66,7 +65,7 @@ actor BackendClient {
     func health() async throws -> String {
         struct Health: Codable { let status: String; let version: String }
         let value: Health = try await request(path: "/api/health", authenticated: false)
-        return "\(value.status) · v\(value.version)"
+        return value.status == "ok" ? "Online" : "Temporarily unavailable"
     }
 
     func connections() async throws -> ConnectionResponse {
@@ -117,6 +116,46 @@ actor BackendClient {
         return response.automation
     }
 
+    func setAutomation(_ id: String, enabled: Bool) async throws -> SavedAutomation {
+        struct Body: Codable { let enabled: Bool }
+        struct Response: Codable { let automation: SavedAutomation }
+        let response: Response = try await request(
+            path: "/api/automations/\(id)",
+            method: "PATCH",
+            body: Body(enabled: enabled)
+        )
+        return response.automation
+    }
+
+    func runAutomation(_ id: String) async throws -> SavedAutomation {
+        struct Body: Codable { let action: String }
+        struct Response: Codable { let automation: SavedAutomation }
+        let response: Response = try await request(
+            path: "/api/automations/\(id)",
+            method: "POST",
+            body: Body(action: "run")
+        )
+        return response.automation
+    }
+
+    func deleteAutomation(_ id: String) async throws {
+        struct Response: Codable { let deleted: String }
+        let _: Response = try await request(path: "/api/automations/\(id)", method: "DELETE")
+    }
+
+    func deleteAccount() async throws {
+        struct Response: Codable { let deleted: Bool }
+        let _: Response = try await request(path: "/api/account/delete", method: "DELETE")
+        clearIdentity()
+    }
+
+    func clearIdentity() {
+        session = nil
+        KeychainStore.set("", for: "apiToken")
+        KeychainStore.set("", for: "userID")
+        KeychainStore.set("", for: "deviceID")
+    }
+
     private func request<Response: Decodable>(path: String, method: String = "GET", body: (any Encodable)? = nil, authenticated: Bool = true) async throws -> Response {
         let url = baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
         var request = URLRequest(url: url)
@@ -153,9 +192,16 @@ actor BackendClient {
         case decoding(String)
         var errorDescription: String? {
             switch self {
-            case .invalidResponse: "The server returned an invalid response."
-            case .server(let value): value.replacingOccurrences(of: "_", with: " ")
-            case .decoding(let value): "Could not read the server response: \(value)"
+            case .invalidResponse: "The service returned an invalid response."
+            case .server(let value):
+                switch value {
+                case "provider_not_configured": "This connection is not available yet."
+                case "connection_required": "Connect this app first, then try again."
+                case "redis_not_configured": "Cloud automations are temporarily unavailable."
+                case "unauthorized": "Your session expired. Please try again."
+                default: value.replacingOccurrences(of: "_", with: " ").capitalized
+                }
+            case .decoding: "The service sent an unexpected response. Please try again."
             }
         }
     }

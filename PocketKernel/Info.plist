@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
+<key>CFBundleDevelopmentRegion</key><string>$(DEVELOPMENT_LANGUAGE)</string>
 <key>CFBundleDisplayName</key><string>PocketKernel</string>
 <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
 <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
@@ -11,9 +12,12 @@
 <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
 <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>com.nightvibes33.pocketkernel.oauth</string><key>CFBundleURLSchemes</key><array><string>pocketkernel</string></array></dict></array>
 <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
-<key>NSCalendarsFullAccessUsageDescription</key><string>PocketKernel creates calendar events only after you approve an action.</string>
-<key>NSRemindersFullAccessUsageDescription</key><string>PocketKernel creates reminders only after you approve an action.</string>
+<key>LSRequiresIPhoneOS</key><true/>
+<key>NSCalendarsFullAccessUsageDescription</key><string>PocketKernel creates calendar events only after you approve the exact event details.</string>
+<key>NSRemindersFullAccessUsageDescription</key><string>PocketKernel creates reminders only after you approve the exact reminder details.</string>
+<key>UIApplicationSupportsIndirectInputEvents</key><true/>
 <key>UILaunchScreen</key><dict/>
+<key>UIRequiredDeviceCapabilities</key><array><string>arm64</string></array>
 <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
 <key>UISupportedInterfaceOrientations~ipad</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationPortraitUpsideDown</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
 </dict></plist>

@@ -15,6 +15,7 @@
 		A1000000000000000000010D /* OAuthCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000010C /* OAuthCoordinator.swift */; };
 		A1000000000000000000010F /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000010E /* Views.swift */; };
 		A10000000000000000000111 /* PocketKernelApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000110 /* PocketKernelApp.swift */; };
+		A10000000000000000000113 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000112 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 		A1000000000000000000010C /* OAuthCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/OAuthCoordinator.swift; sourceTree = "<group>"; };
 		A1000000000000000000010E /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/Views.swift; sourceTree = "<group>"; };
 		A10000000000000000000110 /* PocketKernelApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/PocketKernelApp.swift; sourceTree = "<group>"; };
+		A10000000000000000000112 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A10000000000000000000003 /* PocketKernel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PocketKernel.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -60,6 +62,7 @@
 				A1000000000000000000010C /* OAuthCoordinator.swift */,
 				A1000000000000000000010E /* Views.swift */,
 				A10000000000000000000110 /* PocketKernelApp.swift */,
+				A10000000000000000000112 /* PrivacyInfo.xcprivacy */,
 			);
 			path = PocketKernel;
 			sourceTree = "<group>";
@@ -121,7 +124,9 @@
 		A1000000000000000000000B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+				A10000000000000000000113 /* PrivacyInfo.xcprivacy in Resources */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -187,12 +192,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PocketKernel/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 2.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -207,12 +212,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PocketKernel/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 2.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
