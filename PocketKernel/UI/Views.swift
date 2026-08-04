@@ -18,6 +18,7 @@ enum MainTab: Hashable {
 
 struct RootView: View {
     @EnvironmentObject private var oauth: OAuthCoordinator
+    @EnvironmentObject private var account: AccountController
     @AppStorage("didCompleteOnboarding.v2") private var didCompleteOnboarding = false
     @State private var selectedTab: MainTab = .home
 
@@ -1267,6 +1268,20 @@ struct ProfileView: View {
                     }
                 }
 
+
+                Section("Account") {
+                    if let profile = account.profile {
+                        LabeledContent("Signed in as", value: profile.displayName)
+                        if let email = profile.email, !email.isEmpty {
+                            LabeledContent("Email", value: email)
+                        }
+                        LabeledContent("Method", value: profile.provider.capitalized)
+                    }
+                    Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right") {
+                        account.signOut()
+                    }
+                }
+
                 Section("Privacy and control") {
                     Label("Planning stays on this iPhone", systemImage: "iphone.gen3.radiowaves.left.and.right")
                     Label("Approval before important actions", systemImage: "hand.raised.fill")
@@ -1346,6 +1361,7 @@ struct ProfileView: View {
         defer { isDeleting = false }
         do {
             try await BackendClient.shared.deleteAccount()
+            account.finishDeletion()
             chat.clearAllLocalData()
             oauth.connections.removeAll()
             oauth.configured.removeAll()

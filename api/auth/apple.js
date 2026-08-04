@@ -1,25 +1,16 @@
-import { authResponse, upsertOIDCAccount } from '../../lib/account.js';
-import { verifyIdentityToken } from '../../lib/oidc.js';
+import { authenticateApple } from '../../lib/account-auth.js';
 import { json, method, readJSON } from '../../lib/http.js';
 
 export default async function handler(req, res) {
   if (!method(req, res, ['POST'])) return;
   try {
     const body = await readJSON(req);
-    const audience = process.env.APPLE_CLIENT_ID || 'com.nightvibes33.pocketkernel';
-    const claims = await verifyIdentityToken(body.identityToken, {
-      issuers: ['https://appleid.apple.com'],
-      audience,
-      jwksURL: 'https://appleid.apple.com/auth/keys'
+    const result = await authenticateApple(String(body.identityToken || ''), String(body.nonce || ''), {
+      name: body.name ? String(body.name).slice(0, 160) : null,
+      email: body.email ? String(body.email).slice(0, 320) : null
     });
-    const user = await upsertOIDCAccount({
-      provider: 'apple',
-      subject: claims.sub,
-      email: body.email || claims.email || null,
-      displayName: body.displayName || null
-    });
-    json(res, 200, authResponse(user));
+    json(res, 200, result);
   } catch (error) {
-    json(res, 401, { error: error.message });
+    json(res, 400, { error: error.message === 'invalid_identity_token' ? 'invalid_apple_token' : error.message });
   }
 }

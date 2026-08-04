@@ -1,0 +1,11 @@
+# PocketKernel cinematic product prompt
+
+Design and implement a production iOS automation app called PocketKernel for ordinary consumers, not developers. Use native SwiftUI, AuthenticationServices, the official GoogleSignInSwift button, Core Haptics/SwiftUI sensory feedback, Canvas, TimelineView, symbol effects, matched geometry, materials, and accessibility APIs. Do not use generated concept art, fake dashboards, neon cyberpunk clichés, generic purple gradient card grids, technical status labels, raw JSON, or developer terminology.
+
+The experience begins with a system-matched launch screen, followed by a maximum 1.2-second branded kernel-orbit motion scene that transitions continuously into an account gateway. The gateway must offer official Continue with Apple, official Continue with Google, and passwordless Continue with email. It should communicate the benefit in one sentence, preserve brand-button rules, support Dynamic Type, VoiceOver, dark/light contrast, Reduce Motion, Reduce Transparency, and one-handed use.
+
+Create a distinct visual language: orbital paths represent connected services; luminous nodes represent approved actions; motion resolves into stable geometry when a task finishes. Use depth sparingly, spring motion with physical continuity, responsive haptics, readable typography, large hit targets, and progressive disclosure. Every animation must communicate state or causality and must have a reduced-motion equivalent.
+
+After authentication, use an interactive three-step onboarding: ask naturally, connect apps only when needed, approve important actions. The main screen should feel alive before data exists, with useful starter prompts, polished conversational transitions, readable action previews, connected-app setup, automation timelines, activity history, account/profile controls, privacy links, sign-out, and in-app data deletion. Never expose OAuth, tokens, backend URLs, provider IDs, model names, or setup diagnostics to normal users.
+
+Acceptance criteria: real SwiftUI implementation; no placeholder buttons; server-verified Apple/Google identity; expiring email codes; restored sessions; no Gmail scopes during primary Google login; service scopes requested incrementally; App Store privacy manifest; official button styling; backend unavailable states; on-device testability; and a green ARM64 IPA build.

@@ -16,6 +16,9 @@
 		A1000000000000000000010F /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000010E /* Views.swift */; };
 		A10000000000000000000111 /* PocketKernelApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000110 /* PocketKernelApp.swift */; };
 		A10000000000000000000113 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000112 /* PrivacyInfo.xcprivacy */; };
+		B20000000000000000000101 /* EntryExperience.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000100 /* EntryExperience.swift */; };
+		B20000000000000000000103 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = B20000000000000000000102 /* GoogleSignInSwift */; };
+		B20000000000000000000105 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000104 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +32,8 @@
 		A1000000000000000000010E /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/Views.swift; sourceTree = "<group>"; };
 		A10000000000000000000110 /* PocketKernelApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/PocketKernelApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000112 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		B20000000000000000000100 /* EntryExperience.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/EntryExperience.swift; sourceTree = "<group>"; };
+		B20000000000000000000104 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000000000000000000003 /* PocketKernel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PocketKernel.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -36,7 +41,9 @@
 		A10000000000000000000004 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (
+				B20000000000000000000103 /* GoogleSignInSwift in Frameworks */,
+			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -63,6 +70,8 @@
 				A1000000000000000000010E /* Views.swift */,
 				A10000000000000000000110 /* PocketKernelApp.swift */,
 				A10000000000000000000112 /* PrivacyInfo.xcprivacy */,
+				B20000000000000000000100 /* EntryExperience.swift */,
+				B20000000000000000000104 /* Assets.xcassets */,
 			);
 			path = PocketKernel;
 			sourceTree = "<group>";
@@ -89,7 +98,9 @@
 			buildRules = ();
 			dependencies = ();
 			name = PocketKernel;
-			packageProductDependencies = ();
+			packageProductDependencies = (
+				B20000000000000000000102 /* GoogleSignInSwift */,
+			);
 			productName = PocketKernel;
 			productReference = A10000000000000000000003 /* PocketKernel.app */;
 			productType = "com.apple.product-type.application";
@@ -114,6 +125,9 @@
 			knownRegions = (en, Base);
 			mainGroup = A10000000000000000000005;
 			productRefGroup = A10000000000000000000007 /* Products */;
+			packageReferences = (
+				B20000000000000000000106 /* XCRemoteSwiftPackageReference GoogleSignIn-iOS */,
+			);
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (A10000000000000000000008 /* PocketKernel */);
@@ -126,6 +140,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000113 /* PrivacyInfo.xcprivacy in Resources */,
+				B20000000000000000000105 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -145,10 +160,31 @@
 				A1000000000000000000010D /* OAuthCoordinator.swift in Sources */,
 				A1000000000000000000010F /* Views.swift in Sources */,
 				A10000000000000000000111 /* PocketKernelApp.swift in Sources */,
+				B20000000000000000000101 /* EntryExperience.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B20000000000000000000106 /* XCRemoteSwiftPackageReference GoogleSignIn-iOS */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B20000000000000000000102 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B20000000000000000000106 /* XCRemoteSwiftPackageReference GoogleSignIn-iOS */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A1000000000000000000000E /* Debug */ = {
@@ -191,13 +227,14 @@
 		A10000000000000000000010 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PocketKernel/PocketKernel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PocketKernel/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2.1.0;
+				MARKETING_VERSION = 2.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -211,13 +248,14 @@
 		A10000000000000000000011 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PocketKernel/PocketKernel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PocketKernel/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2.1.0;
+				MARKETING_VERSION = 2.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

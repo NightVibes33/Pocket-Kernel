@@ -19,6 +19,7 @@ export default async function handler(req, res) {
       await redis('ZREM', 'pk:due', id);
     }
     await deleteKey(`pk:automations:${user.id}`);
+    await deleteKey(`pk:account:${user.id}`);
 
     json(res, 200, { deleted: true });
   } catch (error) {
