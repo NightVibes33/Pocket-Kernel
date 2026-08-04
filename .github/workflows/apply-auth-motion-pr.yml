@@ -21,7 +21,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply verified product upgrade
-        run: bash Scripts/apply_auth_motion.sh
+        run: |
+          sed -i '' 's|base64 -D .bootstrap/auth-motion.bundle|base64 -D -i .bootstrap/auth-motion.bundle|' Scripts/apply_auth_motion.sh
+          bash Scripts/apply_auth_motion.sh
 
       - name: Commit upgraded product
         run: |
