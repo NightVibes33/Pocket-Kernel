@@ -17,6 +17,7 @@
 		A10000000000000000000111 /* PocketKernelApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000110 /* PocketKernelApp.swift */; };
 		A10000000000000000000113 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000112 /* PrivacyInfo.xcprivacy */; };
 		B20000000000000000000101 /* EntryExperience.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000100 /* EntryExperience.swift */; };
+		C30000000000000000000101 /* NovaSecondaryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000100 /* NovaSecondaryViews.swift */; };
 		B20000000000000000000103 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = B20000000000000000000102 /* GoogleSignInSwift */; };
 		B20000000000000000000105 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000104 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -33,6 +34,7 @@
 		A10000000000000000000110 /* PocketKernelApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/PocketKernelApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000112 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		B20000000000000000000100 /* EntryExperience.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/EntryExperience.swift; sourceTree = "<group>"; };
+		C30000000000000000000100 /* NovaSecondaryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/NovaSecondaryViews.swift; sourceTree = "<group>"; };
 		B20000000000000000000104 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000000000000000000003 /* PocketKernel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PocketKernel.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -71,6 +73,7 @@
 				A10000000000000000000110 /* PocketKernelApp.swift */,
 				A10000000000000000000112 /* PrivacyInfo.xcprivacy */,
 				B20000000000000000000100 /* EntryExperience.swift */,
+				C30000000000000000000100 /* NovaSecondaryViews.swift */,
 				B20000000000000000000104 /* Assets.xcassets */,
 			);
 			path = PocketKernel;
@@ -161,6 +164,7 @@
 				A1000000000000000000010F /* Views.swift in Sources */,
 				A10000000000000000000111 /* PocketKernelApp.swift in Sources */,
 				B20000000000000000000101 /* EntryExperience.swift in Sources */,
+				C30000000000000000000101 /* NovaSecondaryViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

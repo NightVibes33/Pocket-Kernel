@@ -1026,11 +1026,11 @@ struct NovaRootView: View {
                 case .home:
                     NovaHomeView()
                 case .automations:
-                    AutomationsView { selected = .home }
+                    NovaAutomationsView { selected = .home }
                 case .activity:
-                    ActivityView()
+                    NovaActivityView()
                 case .profile:
-                    ProfileView { didCompleteOnboarding = false }
+                    NovaProfileView { didCompleteOnboarding = false }
                 }
             }
             .safeAreaPadding(.bottom, 94)
