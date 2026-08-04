@@ -1,0 +1,64 @@
+name: Build PocketKernel Unsigned IPA
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: pocketkernel-ios
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-26-intel
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      DERIVED_DATA: ${{ github.workspace }}/build/DerivedData
+      OUTPUT_DIR: ${{ github.workspace }}/output
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify toolchain
+        run: |
+          set -euo pipefail
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          swift --version
+          [[ "$(xcrun --sdk iphoneos --show-sdk-version)" == 26.* ]]
+      - name: Enforce architecture boundaries
+        run: |
+          set -euo pipefail
+          grep -Rqs 'SystemLanguageModel.default' PocketKernel --include='*.swift'
+          grep -Rqs '@available(iOS 27.0' PocketKernel --include='*.swift'
+          ! grep -RniE 'OpenAI|Anthropic|Gemini|api[_-]?key\s*=' PocketKernel
+          node Scripts/validate_backend.mjs
+          npm test
+      - name: Build ARM64 device app
+        run: |
+          set -o pipefail
+          rm -rf build output && mkdir -p output
+          xcodebuild clean build \
+            -project PocketKernel.xcodeproj \
+            -scheme PocketKernel \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' DEVELOPMENT_TEAM='' \
+            2>&1 | tee "$OUTPUT_DIR/xcodebuild.log"
+      - name: Package and validate
+        run: |
+          Scripts/build_unsigned_ipa.sh "$DERIVED_DATA/Build/Products/Release-iphoneos/PocketKernel.app" "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
+          Scripts/validate_ipa.sh "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
+          (cd "$OUTPUT_DIR" && shasum -a 256 PocketKernel-unsigned.ipa > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketKernel-${{ github.run_number }}
+          path: output/
+          retention-days: 90
+      - name: Publish release
+        if: success() && github.event_name == 'push'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          tag="pocketkernel-build-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" output/PocketKernel-unsigned.ipa output/SHA256SUMS.txt --target "$GITHUB_SHA" --title "PocketKernel Build ${GITHUB_RUN_NUMBER}" --notes "iOS 27 on-device chat automation build."

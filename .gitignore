@@ -1,7 +1,9 @@
+.DS_Store
 build/
 output/
 DerivedData/
-*.xcresult
+.env
+.env.*
+.vercel/
+node_modules/
 xcuserdata/
-.DS_Store
-

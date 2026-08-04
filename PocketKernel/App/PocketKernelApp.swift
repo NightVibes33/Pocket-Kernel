@@ -1,11 +1,27 @@
 import SwiftUI
+import Foundation
+import FoundationModels
+import AuthenticationServices
+import Security
+import UserNotifications
+import EventKit
+import UIKit
+
+// MARK: - App
 
 @main
 struct PocketKernelApp: App {
-    @State private var environment = AppEnvironment()
-    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var chat = ChatController()
+    @StateObject private var executor = ActionExecutor()
+    @StateObject private var oauth = OAuthCoordinator()
+
     var body: some Scene {
-        WindowGroup { RootTabView().environment(environment).task { await environment.load() } }
-            .onChange(of: scenePhase) { _, phase in if phase == .background { environment.lifecycle.cleanBackgroundTransition() } else if phase == .active { Task { await environment.load() } } }
+        WindowGroup {
+            RootView()
+                .environmentObject(chat)
+                .environmentObject(executor)
+                .environmentObject(oauth)
+                .onOpenURL { _ in Task { await oauth.refresh() } }
+        }
     }
 }
