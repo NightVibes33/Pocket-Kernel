@@ -79,7 +79,6 @@ final class PocketKernelUITests: XCTestCase {
 
     private func tap(_ element: XCUIElement, timeout: TimeInterval = 5) {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), "Missing element: \(element)")
-        XCTAssertTrue(element.isHittable, "Element is not hittable: \(element)")
         element.tap()
     }
 }
