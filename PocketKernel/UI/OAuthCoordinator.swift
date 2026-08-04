@@ -31,7 +31,7 @@ final class OAuthCoordinator: NSObject, ObservableObject, ASWebAuthenticationPre
     func connect(_ provider: String) async {
         do {
             let url = try await BackendClient.shared.startOAuth(provider: provider)
-            try await withCheckedThrowingContinuation { continuation in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 let webSession = ASWebAuthenticationSession(url: url, callbackURLScheme: "pocketkernel") { [weak self] callbackURL, error in
                     self?.session = nil
                     if let error { continuation.resume(throwing: error); return }

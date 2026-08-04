@@ -313,11 +313,13 @@ struct SettingsView: View {
                     LabeledContent("Cloud LLM", value: "Never used")
                     LabeledContent("Minimum agent OS", value: "iOS 27")
                 }
-                Section("Automation server") {
+                Section {
                     TextField("https://…", text: $model.backendURL)
                         .textInputAutocapitalization(.never).keyboardType(.URL).onSubmit { model.save() }
                     LabeledContent("Status", value: model.status)
                     Button("Save and test") { model.save(); Task { await model.check() } }
+                } header: {
+                    Text("Automation server")
                 } footer: {
                     Text("The server handles OAuth and deterministic scheduled actions only. Chat text and Apple model sessions stay on this device.")
                 }
