@@ -218,7 +218,7 @@ final class AccountController: NSObject, ObservableObject, ASWebAuthenticationPr
             }
             let components = [credential.fullName?.givenName, credential.fullName?.familyName].compactMap { $0 }
             let name = components.isEmpty ? nil : components.joined(separator: " ")
-            Task { await signInWithApple(token: token, nonce: nonce, name: name, email: credential.email) }
+            Task { await self.signInWithApple(token: token, nonce: nonce, name: name, email: credential.email) }
         }
     }
 
