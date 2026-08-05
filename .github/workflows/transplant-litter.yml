@@ -1,0 +1,84 @@
+name: Transplant litter into PocketKernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/full-litter-port
+    paths:
+      - .github/workflows/transplant-litter.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pocketkernel-litter-transplant
+  cancel-in-progress: true
+
+jobs:
+  transplant:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PocketKernel port branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/full-litter-port
+          fetch-depth: 0
+
+      - name: Clone litter source branch
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/litter-source
+          git clone --depth 1 \
+            --branch feature/apple-on-device-agent \
+            https://github.com/NightVibes33/litter.git \
+            /tmp/litter-source
+          git -C /tmp/litter-source rev-parse HEAD > /tmp/litter-source-sha
+
+      - name: Replace PocketKernel branch with litter-derived source
+        run: |
+          set -euo pipefail
+          cp .github/workflows/transplant-litter.yml /tmp/transplant-litter.yml
+          rsync -a --delete --exclude='.git' /tmp/litter-source/ ./
+          mkdir -p .github/workflows
+          cp /tmp/transplant-litter.yml .github/workflows/transplant-litter.yml
+
+          SOURCE_SHA="$(cat /tmp/litter-source-sha)"
+          cat > POCKETKERNEL_PORT.md <<EOF
+          # PocketKernel litter port
+
+          This branch is the full litter-derived PocketKernel application base.
+
+          - Source repository: NightVibes33/litter
+          - Source branch: feature/apple-on-device-agent
+          - Imported commit: ${SOURCE_SHA}
+          - Destination: NightVibes33/Pocket-Kernel
+          - Destination branch: feature/full-litter-port
+
+          PocketKernel-specific work on this branch replaces litter branding and cloud-first model routing with Apple's on-device Foundation Models runtime while retaining litter's terminal, files, conversations, approvals, providers, and process execution architecture.
+          EOF
+
+          cat > .pocketkernel-port-source.json <<EOF
+          {
+            "sourceRepository": "NightVibes33/litter",
+            "sourceBranch": "feature/apple-on-device-agent",
+            "sourceCommit": "${SOURCE_SHA}",
+            "destinationRepository": "NightVibes33/Pocket-Kernel",
+            "destinationBranch": "feature/full-litter-port"
+          }
+          EOF
+
+      - name: Commit transplanted application
+        run: |
+          set -euo pipefail
+          git config user.name "PocketKernel Port Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No transplant changes detected."
+            exit 0
+          fi
+          SOURCE_SHA="$(cat /tmp/litter-source-sha)"
+          git commit -m "Port litter application into PocketKernel (${SOURCE_SHA:0:12})"
+          git push origin HEAD:feature/full-litter-port
