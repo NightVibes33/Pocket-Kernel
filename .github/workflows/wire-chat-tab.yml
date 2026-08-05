@@ -1,0 +1,99 @@
+name: Wire dedicated Chat tab
+
+on:
+  push:
+    branches:
+      - product/app-store-ready
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[chat-tab]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: product/app-store-ready
+          fetch-depth: 0
+
+      - name: Add source and switch root
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          project_path = Path('PocketKernel.xcodeproj/project.pbxproj')
+          app_path = Path('PocketKernel/App/PocketKernelApp.swift')
+          helper_path = Path('.github/workflows/wire-chat-tab.yml')
+          source_path = Path('PocketKernel/UI/PocketKernelRootView.swift')
+
+          project = project_path.read_text()
+          app = app_path.read_text()
+
+          build_id = 'E50000000000000000000101'
+          file_id = 'E50000000000000000000100'
+
+          if 'PocketKernelRootView.swift in Sources' not in project:
+              project = project.replace(
+                  '/* End PBXBuildFile section */',
+                  '\t\t' + build_id + ' /* PocketKernelRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ' + file_id + ' /* PocketKernelRootView.swift */; };\n/* End PBXBuildFile section */',
+                  1,
+              )
+              project = project.replace(
+                  '/* End PBXFileReference section */',
+                  '\t\t' + file_id + ' /* PocketKernelRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/PocketKernelRootView.swift; sourceTree = "<group>"; };\n/* End PBXFileReference section */',
+                  1,
+              )
+              project = project.replace(
+                  '\t\t\t\tD40000000000000000000100 /* RealityRootView.swift */,',
+                  '\t\t\t\tD40000000000000000000100 /* RealityRootView.swift */,\n\t\t\t\t' + file_id + ' /* PocketKernelRootView.swift */,',
+                  1,
+              )
+              project = project.replace(
+                  '\t\t\t\tD40000000000000000000101 /* RealityRootView.swift in Sources */,',
+                  '\t\t\t\tD40000000000000000000101 /* RealityRootView.swift in Sources */,\n\t\t\t\t' + build_id + ' /* PocketKernelRootView.swift in Sources */,',
+                  1,
+              )
+
+          if 'PocketKernelRootView()' not in app:
+              app, count = re.subn(
+                  r'(struct NovaEntryView: View \{\s*var body: some View \{\s*)RealityRootView\(\)',
+                  r'\1PocketKernelRootView()',
+                  app,
+                  count=1,
+              )
+              if count != 1:
+                  raise SystemExit('Could not switch NovaEntryView to PocketKernelRootView')
+
+          project = re.sub(r'CURRENT_PROJECT_VERSION = \d+;', 'CURRENT_PROJECT_VERSION = 72;', project)
+          project = re.sub(r'MARKETING_VERSION = [^;]+;', 'MARKETING_VERSION = 2.4.0;', project)
+
+          project_path.write_text(project)
+          app_path.write_text(app)
+          helper_path.unlink()
+
+          checks = {
+              'source exists': source_path.exists(),
+              'source added to build': 'PocketKernelRootView.swift in Sources' in project,
+              'five tabs exist': 'case chat' in source_path.read_text() and 'PocketKernelMainTab.allCases' in source_path.read_text(),
+              'entry switched': 'PocketKernelRootView()' in app,
+              'version bumped': 'MARKETING_VERSION = 2.4.0;' in project and 'CURRENT_PROJECT_VERSION = 72;' in project,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          if failed:
+              raise SystemExit('Validation failed: ' + ', '.join(failed))
+          for name in checks:
+              print('PASS:', name)
+          PY
+
+      - name: Commit Chat tab
+        shell: bash
+        run: |
+          git config user.name Zyn
+          git config user.email bobbytatum999@gmail.com
+          git add -A
+          git commit -m 'feat: give Chat its own bottom tab [chat-tab]'
+          git push origin HEAD:product/app-store-ready
