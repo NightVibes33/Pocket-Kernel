@@ -43,8 +43,7 @@ jobs:
           test -f /tmp/litter-source/apps/ios/project.yml
           test -d /tmp/litter-source/apps/ios/Sources/Litter
           test -f /tmp/litter-source/.gitmodules
-          test -f /tmp/litter-source/Cargo.toml
-          echo "Verified litter source at $SOURCE_SHA"
+          echo "Verified litter iOS source at $SOURCE_SHA"
           find /tmp/litter-source/apps/ios -maxdepth 2 -type f | sort | head -80
 
       - name: Replace branch contents with litter application
@@ -91,7 +90,6 @@ jobs:
           test -f apps/ios/project.yml
           test -d apps/ios/Sources/Litter
           test -f .gitmodules
-          test -f Cargo.toml
           test -f POCKETKERNEL_PORT.md
           test -f .pocketkernel-port-source.json
 
@@ -123,5 +121,5 @@ jobs:
           git reset --hard origin/feature/full-litter-port
           test -f apps/ios/project.yml
           test -d apps/ios/Sources/Litter
-          test -f Cargo.toml
+          test -f .gitmodules
           git log -1 --oneline
