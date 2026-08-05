@@ -21,6 +21,7 @@
 		B20000000000000000000103 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = B20000000000000000000102 /* GoogleSignInSwift */; };
 		B20000000000000000000105 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000104 /* Assets.xcassets */; };
 		D40000000000000000000101 /* RealityRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D40000000000000000000100 /* RealityRootView.swift */; };
+		E50000000000000000000101 /* PocketKernelRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50000000000000000000100 /* PocketKernelRootView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +40,7 @@
 		B20000000000000000000104 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A10000000000000000000003 /* PocketKernel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PocketKernel.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D40000000000000000000100 /* RealityRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/RealityRootView.swift; sourceTree = "<group>"; };
+		E50000000000000000000100 /* PocketKernelRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/PocketKernelRootView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -77,6 +79,7 @@
 				B20000000000000000000100 /* EntryExperience.swift */,
 				C30000000000000000000100 /* NovaSecondaryViews.swift */,
 				D40000000000000000000100 /* RealityRootView.swift */,
+				E50000000000000000000100 /* PocketKernelRootView.swift */,
 				B20000000000000000000104 /* Assets.xcassets */,
 			);
 			path = PocketKernel;
@@ -169,6 +172,7 @@
 				B20000000000000000000101 /* EntryExperience.swift in Sources */,
 				C30000000000000000000101 /* NovaSecondaryViews.swift in Sources */,
 				D40000000000000000000101 /* RealityRootView.swift in Sources */,
+				E50000000000000000000101 /* PocketKernelRootView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -237,12 +241,12 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PocketKernel/PocketKernel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 71;
+				CURRENT_PROJECT_VERSION = 72;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PocketKernel/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2.3.0;
+				MARKETING_VERSION = 2.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -258,12 +262,12 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PocketKernel/PocketKernel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 71;
+				CURRENT_PROJECT_VERSION = 72;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PocketKernel/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 2.3.0;
+				MARKETING_VERSION = 2.4.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nightvibes33.pocketkernel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

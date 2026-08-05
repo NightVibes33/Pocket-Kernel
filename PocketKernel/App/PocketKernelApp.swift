@@ -262,7 +262,7 @@ struct NovaPrimaryButtonStyle: ButtonStyle {
 
 struct NovaEntryView: View {
     var body: some View {
-        RealityRootView()
+        PocketKernelRootView()
     }
 }
 
