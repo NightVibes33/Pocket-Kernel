@@ -26,21 +26,38 @@ jobs:
           ref: feature/full-litter-port
           fetch-depth: 0
 
-      - name: Clone litter source branch
+      - name: Clone and verify litter source
+        shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           rm -rf /tmp/litter-source
           git clone --depth 1 \
+            --single-branch \
             --branch feature/apple-on-device-agent \
             https://github.com/NightVibes33/litter.git \
             /tmp/litter-source
-          git -C /tmp/litter-source rev-parse HEAD > /tmp/litter-source-sha
 
-      - name: Replace PocketKernel branch with litter-derived source
+          SOURCE_SHA="$(git -C /tmp/litter-source rev-parse HEAD)"
+          printf '%s\n' "$SOURCE_SHA" > /tmp/litter-source-sha
+
+          test -f /tmp/litter-source/apps/ios/project.yml
+          test -d /tmp/litter-source/apps/ios/Sources/Litter
+          test -d /tmp/litter-source/packages
+          echo "Verified litter source at $SOURCE_SHA"
+          find /tmp/litter-source/apps/ios -maxdepth 2 -type f | sort | head -80
+
+      - name: Replace branch contents with litter application
+        shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
+
           cp .github/workflows/transplant-litter.yml /tmp/transplant-litter.yml
-          rsync -a --delete --exclude='.git' /tmp/litter-source/ ./
+
+          # This branch is dedicated to the port. Keep only its Git metadata,
+          # then copy the complete litter source tree into the checkout.
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf -- {} +
+          rsync -a --exclude='.git/' /tmp/litter-source/ ./
+
           mkdir -p .github/workflows
           cp /tmp/transplant-litter.yml .github/workflows/transplant-litter.yml
 
@@ -48,15 +65,15 @@ jobs:
           cat > POCKETKERNEL_PORT.md <<EOF
           # PocketKernel litter port
 
-          This branch is the full litter-derived PocketKernel application base.
+          This branch contains the complete litter-derived PocketKernel application base.
 
           - Source repository: NightVibes33/litter
           - Source branch: feature/apple-on-device-agent
           - Imported commit: ${SOURCE_SHA}
-          - Destination: NightVibes33/Pocket-Kernel
+          - Destination repository: NightVibes33/Pocket-Kernel
           - Destination branch: feature/full-litter-port
 
-          PocketKernel-specific work on this branch replaces litter branding and cloud-first model routing with Apple's on-device Foundation Models runtime while retaining litter's terminal, files, conversations, approvals, providers, and process execution architecture.
+          PocketKernel-specific commits on this branch rebrand the application and make Apple's on-device Foundation Models runtime the actual default conversation backend while retaining litter's terminal, files, conversations, approvals, providers, and process runtime.
           EOF
 
           cat > .pocketkernel-port-source.json <<EOF
@@ -69,16 +86,40 @@ jobs:
           }
           EOF
 
+          # The workflow is not allowed to report success for a partial copy.
+          test -f apps/ios/project.yml
+          test -d apps/ios/Sources/Litter
+          test -d packages
+          test -f POCKETKERNEL_PORT.md
+          test -f .pocketkernel-port-source.json
+
+          echo 'PocketKernel transplant verification passed.'
+          git status --short | sed -n '1,240p'
+
       - name: Commit transplanted application
+        shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           git config user.name "PocketKernel Port Bot"
           git config user.email "actions@users.noreply.github.com"
           git add -A
+
           if git diff --cached --quiet; then
-            echo "No transplant changes detected."
-            exit 0
+            echo 'ERROR: transplant produced no repository changes.' >&2
+            exit 1
           fi
+
           SOURCE_SHA="$(cat /tmp/litter-source-sha)"
-          git commit -m "Port litter application into PocketKernel (${SOURCE_SHA:0:12})"
+          git commit -m "Port complete litter app into PocketKernel (${SOURCE_SHA:0:12})"
           git push origin HEAD:feature/full-litter-port
+
+      - name: Verify committed branch tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch origin feature/full-litter-port
+          git reset --hard origin/feature/full-litter-port
+          test -f apps/ios/project.yml
+          test -d apps/ios/Sources/Litter
+          test -d packages
+          git log -1 --oneline
