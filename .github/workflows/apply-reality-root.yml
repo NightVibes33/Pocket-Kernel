@@ -1,0 +1,197 @@
+name: Apply reality-first layout
+
+on:
+  push:
+    branches:
+      - product/app-store-ready
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[apply-reality]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: product/app-store-ready
+          fetch-depth: 0
+
+      - name: Wire layout and remove fake starters
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          app_path = Path("PocketKernel/App/PocketKernelApp.swift")
+          app = app_path.read_text()
+          new_entry = '''struct NovaEntryView: View {
+              var body: some View {
+                  RealityRootView()
+              }
+          }
+
+          struct NovaBootView'''
+          app, count = re.subn(
+              r"struct NovaEntryView: View \{.*?\n\}\n\nstruct NovaBootView",
+              new_entry,
+              app,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit("Could not replace NovaEntryView")
+          app_path.write_text(app)
+
+          models_path = Path("PocketKernel/Core/SharedModels.swift")
+          models = models_path.read_text()
+          starters = '''    static let featured: [StarterTemplate] = [
+              .init(
+                  id: "native-reminder",
+                  title: "Create a reminder",
+                  subtitle: "Apple Reminders after approval",
+                  prompt: "Create a reminder. Ask me for the reminder text, date, and time before preparing it.",
+                  symbol: "checkmark.circle.fill",
+                  tint: .green,
+                  category: .planning
+              ),
+              .init(
+                  id: "native-calendar",
+                  title: "Add a calendar event",
+                  subtitle: "Apple Calendar after approval",
+                  prompt: "Create a calendar event. Ask me for the title, date, start time, and duration before preparing it.",
+                  symbol: "calendar.badge.plus",
+                  tint: .teal,
+                  category: .planning
+              ),
+              .init(
+                  id: "native-notification",
+                  title: "Send a notification",
+                  subtitle: "A real local iPhone alert",
+                  prompt: "Prepare a local notification that says PocketKernel is working. Ask for approval before delivering it.",
+                  symbol: "bell.badge.fill",
+                  tint: .orange,
+                  category: .personal
+              ),
+              .init(
+                  id: "native-note",
+                  title: "Save a local note",
+                  subtitle: "Append to PocketKernel Notes.txt",
+                  prompt: "Save a note locally. Ask me what text to save before preparing the action.",
+                  symbol: "note.text.badge.plus",
+                  tint: .indigo,
+                  category: .personal
+              ),
+              .init(
+                  id: "native-clipboard",
+                  title: "Copy text",
+                  subtitle: "Write to the iPhone clipboard",
+                  prompt: "Copy text to my clipboard. Ask me for the text before preparing the action.",
+                  symbol: "doc.on.clipboard.fill",
+                  tint: .blue,
+                  category: .sharing
+              ),
+              .init(
+                  id: "native-link",
+                  title: "Open a secure link",
+                  subtitle: "HTTPS links only",
+                  prompt: "Open a website. Ask me for the HTTPS address before preparing the action.",
+                  symbol: "safari.fill",
+                  tint: .purple,
+                  category: .personal
+              )
+          ]
+          }'''
+          models, count = re.subn(
+              r"    static let featured: \[StarterTemplate\] = \[.*?\n    \]\n\}",
+              starters,
+              models,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit("Could not replace StarterTemplate.featured")
+          models_path.write_text(models)
+
+          chat_path = Path("PocketKernel/Agent/ChatAgent.swift")
+          chat = chat_path.read_text().replace(
+              'ChatMessage(role: .assistant, text: "What would you like to take off your plate?")',
+              'ChatMessage(role: .assistant, text: "Describe an action. I’ll prepare the exact values for your approval.")',
+          )
+          chat_path.write_text(chat)
+
+          reality_path = Path("PocketKernel/UI/RealityRootView.swift")
+          reality = reality_path.read_text().replace(
+              "    @ViewBuilder let trailing: Trailing",
+              "    let trailing: Trailing",
+          )
+          reality_path.write_text(reality)
+
+          project_path = Path("PocketKernel.xcodeproj/project.pbxproj")
+          project = project_path.read_text()
+          file_id = "D40000000000000000000100"
+          build_id = "D40000000000000000000101"
+
+          if "RealityRootView.swift in Sources" not in project:
+              build_line = (
+                  "\t\t" + build_id +
+                  " /* RealityRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = " +
+                  file_id + " /* RealityRootView.swift */; };\n"
+              )
+              file_line = (
+                  "\t\t" + file_id +
+                  " /* RealityRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; "
+                  "path = UI/RealityRootView.swift; sourceTree = \"<group>\"; };\n"
+              )
+              project = project.replace("/* End PBXBuildFile section */", build_line + "/* End PBXBuildFile section */", 1)
+              project = project.replace("/* End PBXFileReference section */", file_line + "/* End PBXFileReference section */", 1)
+
+              group_anchor = "\t\t\t\tC30000000000000000000100 /* NovaSecondaryViews.swift */,\n"
+              source_anchor = "\t\t\t\tC30000000000000000000101 /* NovaSecondaryViews.swift in Sources */,\n"
+              if group_anchor not in project or source_anchor not in project:
+                  raise SystemExit("Could not find Xcode project anchors")
+              project = project.replace(
+                  group_anchor,
+                  group_anchor + "\t\t\t\t" + file_id + " /* RealityRootView.swift */,\n",
+                  1,
+              )
+              project = project.replace(
+                  source_anchor,
+                  source_anchor + "\t\t\t\t" + build_id + " /* RealityRootView.swift in Sources */,\n",
+                  1,
+              )
+
+          project = re.sub(r"CURRENT_PROJECT_VERSION = \d+;", "CURRENT_PROJECT_VERSION = 71;", project)
+          project = re.sub(r"MARKETING_VERSION = [^;]+;", "MARKETING_VERSION = 2.3.0;", project)
+          project_path.write_text(project)
+
+          helper = Path(".github/workflows/apply-reality-root.yml")
+          if helper.exists():
+              helper.unlink()
+
+          validations = {
+              "entry": "RealityRootView()" in app,
+              "source": reality_path.exists(),
+              "project": "RealityRootView.swift in Sources" in project,
+              "native starters": "native-reminder" in models,
+              "fake starter removed": "Morning inbox brief" not in models,
+              "version": "MARKETING_VERSION = 2.3.0;" in project and "CURRENT_PROJECT_VERSION = 71;" in project,
+              "helper removed": not helper.exists(),
+          }
+          failures = [name for name, passed in validations.items() if not passed]
+          if failures:
+              raise SystemExit("Validation failed: " + ", ".join(failures))
+          for name in validations:
+              print("PASS", name)
+          PY
+
+      - name: Commit layout
+        shell: bash
+        run: |
+          git config user.name "PocketKernel CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: reality-first layout with live data only [apply-reality]"
+          git push origin HEAD:product/app-store-ready
