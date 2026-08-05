@@ -33,7 +33,7 @@ final class ChatController: ObservableObject {
     }
 
     static var welcomeMessage: ChatMessage {
-        ChatMessage(role: .assistant, text: "What would you like to take off your plate?")
+        ChatMessage(role: .assistant, text: "Describe an action. I’ll prepare the exact values for your approval.")
     }
 
     var hasConversation: Bool {

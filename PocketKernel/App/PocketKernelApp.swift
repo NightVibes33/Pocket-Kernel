@@ -261,39 +261,8 @@ struct NovaPrimaryButtonStyle: ButtonStyle {
 // MARK: - Entry experience
 
 struct NovaEntryView: View {
-    @AppStorage("didCompleteOnboarding.v3") private var didCompleteOnboarding = false
-    @State private var phase: Phase = .launch
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private enum Phase {
-        case launch
-        case ready
-    }
-
     var body: some View {
-        ZStack {
-            switch phase {
-            case .launch:
-                NovaBootView()
-                    .transition(.opacity.combined(with: .scale(scale: 1.03)))
-            case .ready:
-                if !didCompleteOnboarding {
-                    NovaOnboardingView { didCompleteOnboarding = true }
-                        .transition(.opacity.combined(with: .move(edge: .trailing)))
-                } else {
-                    NovaRootView()
-                        .transition(.opacity)
-                }
-            }
-        }
-        .background(NovaPalette.ink)
-        .animation(reduceMotion ? .linear(duration: 0.16) : .easeInOut(duration: 0.52), value: phase)
-        .task {
-            try? await Task.sleep(for: .milliseconds(reduceMotion ? 180 : 880))
-            withAnimation(reduceMotion ? .linear(duration: 0.16) : .easeInOut(duration: 0.52)) {
-                phase = .ready
-            }
-        }
+        RealityRootView()
     }
 }
 

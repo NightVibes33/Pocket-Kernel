@@ -522,7 +522,7 @@ struct RealityScreenHeader<Trailing: View>: View {
     let title: String
     let detail: String
     let symbol: String
-    @ViewBuilder let trailing: Trailing
+    let trailing: Trailing
 
     init(
         title: String,

@@ -83,61 +83,61 @@ struct StarterTemplate: Identifiable, Hashable {
     let category: TemplateCategory
 
     static let featured: [StarterTemplate] = [
-        .init(
-            id: "morning-inbox",
-            title: "Morning inbox brief",
-            subtitle: "Summarize what needs attention",
-            prompt: "Every weekday morning, summarize the important unread emails in my Gmail and tell me what needs a reply.",
-            symbol: "sunrise.fill",
-            tint: .orange,
-            category: .inbox
-        ),
-        .init(
-            id: "follow-up",
-            title: "Follow-up reminder",
-            subtitle: "Never lose track of a reply",
-            prompt: "Remind me in three days if I have not received a reply to the latest important email I sent.",
-            symbol: "arrowshape.turn.up.left.fill",
-            tint: .blue,
-            category: .inbox
-        ),
-        .init(
-            id: "meeting-prep",
-            title: "Meeting prep",
-            subtitle: "Get ready before the call",
-            prompt: "Before my next calendar event, give me a short preparation checklist and the important details from the event.",
-            symbol: "person.2.fill",
-            tint: .indigo,
-            category: .planning
-        ),
-        .init(
-            id: "slack-update",
-            title: "Send a team update",
-            subtitle: "Turn a thought into a clear post",
-            prompt: "Help me write a concise project update and send it to my Slack channel after I approve it.",
-            symbol: "text.bubble.fill",
-            tint: .purple,
-            category: .sharing
-        ),
-        .init(
-            id: "quick-reminder",
-            title: "Create a reminder",
-            subtitle: "Capture it before you forget",
-            prompt: "Create a reminder for tomorrow at 9 AM to review my weekly priorities.",
-            symbol: "checkmark.circle.fill",
-            tint: .green,
-            category: .personal
-        ),
-        .init(
-            id: "calendar-block",
-            title: "Protect focus time",
-            subtitle: "Add a block to your calendar",
-            prompt: "Create a 90-minute focus block on my calendar tomorrow afternoon. Ask me before adding it.",
-            symbol: "calendar.badge.plus",
-            tint: .teal,
-            category: .planning
-        )
-    ]
+    .init(
+        id: "native-reminder",
+        title: "Create a reminder",
+        subtitle: "Apple Reminders after approval",
+        prompt: "Create a reminder. Ask me for the reminder text, date, and time before preparing it.",
+        symbol: "checkmark.circle.fill",
+        tint: .green,
+        category: .planning
+    ),
+    .init(
+        id: "native-calendar",
+        title: "Add a calendar event",
+        subtitle: "Apple Calendar after approval",
+        prompt: "Create a calendar event. Ask me for the title, date, start time, and duration before preparing it.",
+        symbol: "calendar.badge.plus",
+        tint: .teal,
+        category: .planning
+    ),
+    .init(
+        id: "native-notification",
+        title: "Send a notification",
+        subtitle: "A real local iPhone alert",
+        prompt: "Prepare a local notification that says PocketKernel is working. Ask for approval before delivering it.",
+        symbol: "bell.badge.fill",
+        tint: .orange,
+        category: .personal
+    ),
+    .init(
+        id: "native-note",
+        title: "Save a local note",
+        subtitle: "Append to PocketKernel Notes.txt",
+        prompt: "Save a note locally. Ask me what text to save before preparing the action.",
+        symbol: "note.text.badge.plus",
+        tint: .indigo,
+        category: .personal
+    ),
+    .init(
+        id: "native-clipboard",
+        title: "Copy text",
+        subtitle: "Write to the iPhone clipboard",
+        prompt: "Copy text to my clipboard. Ask me for the text before preparing the action.",
+        symbol: "doc.on.clipboard.fill",
+        tint: .blue,
+        category: .sharing
+    ),
+    .init(
+        id: "native-link",
+        title: "Open a secure link",
+        subtitle: "HTTPS links only",
+        prompt: "Open a website. Ask me for the HTTPS address before preparing the action.",
+        symbol: "safari.fill",
+        tint: .purple,
+        category: .personal
+    )
+]
 }
 
 struct ProviderDescriptor: Identifiable, Hashable {
