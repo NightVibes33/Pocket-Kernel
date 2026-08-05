@@ -19,7 +19,9 @@ jobs:
       DERIVED_DATA: ${{ github.workspace }}/build/DerivedData
       OUTPUT_DIR: ${{ github.workspace }}/output
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - name: Verify toolchain
         run: |
           set -euo pipefail
@@ -27,6 +29,11 @@ jobs:
           xcodebuild -version
           swift --version
           [[ "$(xcrun --sdk iphoneos --show-sdk-version)" == 26.* ]]
+      - name: Materialize branded assets
+        run: |
+          set -euo pipefail
+          bash Scripts/materialize_app_icon.sh
+          test -s PocketKernel/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
       - name: Enforce architecture boundaries
         run: |
           set -euo pipefail
@@ -46,8 +53,17 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$DERIVED_DATA" \
+            ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' DEVELOPMENT_TEAM='' \
             2>&1 | tee "$OUTPUT_DIR/xcodebuild.log"
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketKernel-build-diagnostics-${{ github.run_number }}
+          path: output/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Package and validate
         run: |
           Scripts/build_unsigned_ipa.sh "$DERIVED_DATA/Build/Products/Release-iphoneos/PocketKernel.app" "$OUTPUT_DIR/PocketKernel-unsigned.ipa"
@@ -63,4 +79,4 @@ jobs:
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           tag="pocketkernel-build-${GITHUB_RUN_NUMBER}"
-          gh release create "$tag" output/PocketKernel-unsigned.ipa output/SHA256SUMS.txt --target "$GITHUB_SHA" --title "PocketKernel Build ${GITHUB_RUN_NUMBER}" --notes "iOS 27 on-device chat automation build."
+          gh release create "$tag" output/PocketKernel-unsigned.ipa output/SHA256SUMS.txt --target "$GITHUB_SHA" --title "PocketKernel Build ${GITHUB_RUN_NUMBER}" --notes "PocketKernel premium redesign with secure account flows and matching app icon."

@@ -15,5 +15,7 @@ executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")"
 [[ -f "$app/$executable" ]] || { echo "Missing bundle executable: $executable"; exit 1; }
 [[ -x "$app/$executable" ]] || { echo "Bundle executable is not executable: $executable"; exit 1; }
 file "$app/$executable" | grep -Eq 'Mach-O 64-bit.*arm64|Mach-O 64-bit arm64 executable'
+[[ -f "$app/PrivacyInfo.xcprivacy" ]] || { echo 'Missing PrivacyInfo.xcprivacy'; exit 1; }
+/usr/bin/plutil -lint "$app/PrivacyInfo.xcprivacy" >/dev/null
 ! find "$app" -name '*.mobileprovision' | grep -q .
-echo "Validated unsigned ARM64 IPA with executable $executable: $ipa"
+echo "Validated unsigned ARM64 IPA with privacy manifest and executable $executable: $ipa"

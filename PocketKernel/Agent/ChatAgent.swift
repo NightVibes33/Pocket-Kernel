@@ -11,36 +11,58 @@ import UIKit
 
 @MainActor
 final class ChatController: ObservableObject {
-    @Published var messages: [ChatMessage] = [
-        ChatMessage(role: .assistant, text: "Tell me what you want done. I use the iOS 27 model on this iPhone, call registered tools, and ask before anything sensitive happens.")
-    ]
+    @Published var messages: [ChatMessage] {
+        didSet { persist() }
+    }
     @Published var pending: [ToolProposal] = []
-    @Published var activity: [ActivityItem] = []
+    @Published var activity: [ActivityItem] {
+        didSet { persist() }
+    }
     @Published var isThinking = false
     @Published var errorText: String?
 
     private let broker = ProposalBroker()
     private var session: Any?
+    private static let messagesKey = "pocketkernel.chat.messages.v2"
+    private static let activityKey = "pocketkernel.activity.v2"
 
-    var modelStatus: String {
-        guard #available(iOS 27.0, *) else { return "Requires iOS 27" }
-        return SystemLanguageModel.default.isAvailable ? "On-device model ready" : "Apple Intelligence unavailable"
+    init() {
+        messages = Self.load([ChatMessage].self, key: Self.messagesKey) ?? [Self.welcomeMessage]
+        activity = Self.load([ActivityItem].self, key: Self.activityKey) ?? []
+        if messages.isEmpty { messages = [Self.welcomeMessage] }
+    }
+
+    static var welcomeMessage: ChatMessage {
+        ChatMessage(role: .assistant, text: "Describe an action. I’ll prepare the exact values for your approval.")
+    }
+
+    var hasConversation: Bool {
+        messages.contains { $0.role == .user }
+    }
+
+    var readiness: ModelReadiness {
+        guard #available(iOS 27.0, *) else { return .unsupported }
+        return SystemLanguageModel.default.isAvailable ? .ready : .unavailable
     }
 
     func send(_ text: String) async {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty else { return }
+        guard !prompt.isEmpty, !isThinking else { return }
         messages.append(ChatMessage(role: .user, text: prompt))
         errorText = nil
         isThinking = true
         defer { isThinking = false }
 
         guard #available(iOS 27.0, *) else {
-            errorText = "PocketKernel requires iOS 27 for its on-device chat agent."
+            let message = "Update this iPhone to iOS 27 to use private automation."
+            errorText = message
+            messages.append(ChatMessage(role: .system, text: message))
             return
         }
         guard SystemLanguageModel.default.isAvailable else {
-            errorText = "Turn on Apple Intelligence and allow the model to finish downloading."
+            let message = "Apple Intelligence is not ready yet. Turn it on in Settings and let the model finish downloading."
+            errorText = message
+            messages.append(ChatMessage(role: .system, text: message))
             return
         }
 
@@ -58,29 +80,38 @@ final class ChatController: ObservableObject {
                     ]
                 ) {
                     """
-                    You are PocketKernel, a private chat automation agent running with Apple's on-device iOS 27 foundation model.
+                    You are PocketKernel, a friendly private automation assistant for everyday iPhone users.
 
-                    Your job is to understand requests, explain briefly, and call registered tools when an action is needed.
-                    Never claim an action happened unless a tool result confirms it.
-                    Never ask for OAuth passwords or tokens. The app handles official service sign-in.
-                    Never invent unsupported tools or services.
+                    Understand what the person wants, ask one short clarifying question only when a required detail is missing, and call a registered tool when an action is ready.
+                    Use plain language. Do not mention APIs, JSON, OAuth, tokens, providers, backends, language models, or implementation details unless the person explicitly asks.
+                    Never claim something happened until a tool result confirms it.
+                    Never ask for passwords, access tokens, API keys, or secret credentials. Official sign-in is handled by the app.
+                    Never invent unsupported actions or connected apps.
                     For Gmail, Slack, Discord, Reddit, Notion, and Google Calendar, use serviceAction.
-                    For repeated unattended service work, first propose the concrete service action, then use scheduleAutomation with deterministic steps.
-                    For iPhone actions, use nativeAction.
-                    Sensitive writes must be proposed for approval. Read-only Gmail listing may run without approval.
-                    Keep responses direct and useful.
+                    For repeated unattended work, first identify the exact service action, then use scheduleAutomation with deterministic steps.
+                    For reminders, calendar events, links, clipboard, notifications, and local notes, use nativeAction.
+                    Significant writes must be shown for approval before execution. Read-only Gmail listing may run without approval.
+                    Keep answers warm, concise, and focused on the outcome.
                     """
                 }
                 session = activeSession
             }
             let response = try await activeSession.respond(to: prompt)
-            messages.append(ChatMessage(role: .assistant, text: response.content))
+            let reply = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !reply.isEmpty {
+                messages.append(ChatMessage(role: .assistant, text: reply))
+            }
             let newProposals = await broker.drain()
             pending.append(contentsOf: newProposals)
         } catch {
-            errorText = error.localizedDescription
-            messages.append(ChatMessage(role: .system, text: "The on-device agent stopped: \(error.localizedDescription)"))
+            let message = friendly(error)
+            errorText = message
+            messages.append(ChatMessage(role: .system, text: message))
         }
+    }
+
+    func send(_ template: StarterTemplate) async {
+        await send(template.prompt)
     }
 
     func approve(_ proposal: ToolProposal, executor: ActionExecutor) async {
@@ -88,25 +119,69 @@ final class ChatController: ObservableObject {
         do {
             let result = try await executor.execute(proposal)
             activity.insert(ActivityItem(title: proposal.title, detail: result, succeeded: true), at: 0)
-            messages.append(ChatMessage(role: .assistant, text: result))
+            messages.append(ChatMessage(role: .assistant, text: result.isEmpty ? "Done." : result))
             if #available(iOS 27.0, *), let activeSession = session as? LanguageModelSession {
-                _ = try? await activeSession.respond(to: "The person approved proposal \(proposal.id.uuidString). Execution result: \(result). Acknowledge the result without calling another tool unless necessary.")
+                _ = try? await activeSession.respond(to: "The person approved the proposed action. It completed with this result: \(result). Keep that result in context. Do not call another tool unless the person asks.")
             }
         } catch {
-            activity.insert(ActivityItem(title: proposal.title, detail: error.localizedDescription, succeeded: false), at: 0)
-            messages.append(ChatMessage(role: .system, text: "Couldn’t complete “\(proposal.title)”: \(error.localizedDescription)"))
+            let message = friendly(error)
+            activity.insert(ActivityItem(title: proposal.title, detail: message, succeeded: false), at: 0)
+            messages.append(ChatMessage(role: .system, text: "I couldn’t complete “\(proposal.title)”. \(message)"))
         }
     }
 
     func reject(_ proposal: ToolProposal) {
         pending.removeAll { $0.id == proposal.id }
-        messages.append(ChatMessage(role: .system, text: "Canceled “\(proposal.title)”."))
+        messages.append(ChatMessage(role: .system, text: "No problem — I didn’t run “\(proposal.title)”."))
     }
 
     func reset() {
         session = nil
-        messages = [ChatMessage(role: .assistant, text: "New private chat started. What should I automate?")]
+        messages = [Self.welcomeMessage]
         pending.removeAll()
         errorText = nil
+    }
+
+    func clearActivity() {
+        activity.removeAll()
+    }
+
+    func clearAllLocalData() {
+        session = nil
+        messages = [Self.welcomeMessage]
+        pending.removeAll()
+        activity.removeAll()
+        errorText = nil
+        UserDefaults.standard.removeObject(forKey: Self.messagesKey)
+        UserDefaults.standard.removeObject(forKey: Self.activityKey)
+    }
+
+    private func friendly(_ error: Error) -> String {
+        let raw = error.localizedDescription
+        if raw.localizedCaseInsensitiveContains("network") || raw.localizedCaseInsensitiveContains("offline") {
+            return "I couldn’t reach the service. Check your connection and try again."
+        }
+        if raw.localizedCaseInsensitiveContains("not connected") || raw.localizedCaseInsensitiveContains("connection_required") {
+            return "Connect the required app first, then try again."
+        }
+        if raw.localizedCaseInsensitiveContains("cancel") {
+            return "The action was canceled."
+        }
+        return raw
+    }
+
+    private func persist() {
+        let encoder = JSONEncoder()
+        if let data = try? encoder.encode(messages) {
+            UserDefaults.standard.set(data, forKey: Self.messagesKey)
+        }
+        if let data = try? encoder.encode(Array(activity.prefix(250))) {
+            UserDefaults.standard.set(data, forKey: Self.activityKey)
+        }
+    }
+
+    private static func load<Value: Decodable>(_ type: Value.Type, key: String) -> Value? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
     }
 }
